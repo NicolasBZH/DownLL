@@ -1,0 +1,59 @@
+// Référence pour proxifier DownLL depuis un reverse-proxy maison en Go
+// (net/http/httputil). À intégrer dans nlaunchpanel.
+//
+// Les 3 réglages CRITIQUES sont commentés. Sans le #1, la barre de
+// progression (SSE) et le téléchargement du fichier restent bloqués
+// jusqu'à la toute fin — c'est l'équivalent Go de "proxy_buffering off".
+
+package main
+
+import (
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"time"
+)
+
+// NewDownLLProxy renvoie un handler qui proxifie le domaine vers l'app DownLL
+// (qui écoute en local sur 127.0.0.1:3000).
+func NewDownLLProxy() http.Handler {
+	target, _ := url.Parse("http://127.0.0.1:3000")
+	proxy := httputil.NewSingleHostReverseProxy(target)
+
+	// CRITIQUE #1 — flush immédiat.
+	// Sans ça, httputil bufferise la réponse : la progression (text/event-stream)
+	// et le streaming du MP4 n'arrivent qu'une fois terminés. -1 = on transmet
+	// chaque écriture immédiatement.
+	proxy.FlushInterval = -1
+
+	// En-têtes transmis à l'app. L'app fait confiance au proxy (TRUST_PROXY=1)
+	// et s'en sert pour la limitation de débit par IP.
+	orig := proxy.Director
+	proxy.Director = func(r *http.Request) {
+		orig(r) // ajoute déjà X-Forwarded-For
+		r.Header.Set("X-Forwarded-Proto", "https")
+		r.Header.Set("X-Forwarded-Host", r.Host)
+	}
+
+	// CRITIQUE #2 — pas de timeout court côté transport.
+	// L'analyse yt-dlp peut prendre quelques secondes ; le corps (gros MP4)
+	// peut être long : on ne fixe PAS de deadline sur le corps.
+	proxy.Transport = &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		ResponseHeaderTimeout: 90 * time.Second,
+	}
+
+	return proxy
+}
+
+// CRITIQUE #3 — côté http.Server, WriteTimeout doit être 0 (ou très grand),
+// sinon Go coupe la réponse en plein téléchargement d'une grosse vidéo.
+//
+//	srv := &http.Server{
+//		Addr:         ":443",
+//		Handler:      mux, // mux qui route vers NewDownLLProxy() pour ce vhost
+//		ReadTimeout:  30 * time.Second,
+//		WriteTimeout: 0,                 // <- important : SSE + gros fichiers
+//		IdleTimeout:  120 * time.Second,
+//	}
+//	log.Fatal(srv.ListenAndServeTLS(certFile, keyFile))

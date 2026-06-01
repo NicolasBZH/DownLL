@@ -1,0 +1,31 @@
+# Exemple de reverse-proxy nginx pour DownLL.
+#
+# À adapter dans la configuration que génère ton panel. Le HTTPS et le
+# certificat étant gérés par le panel, on ne met ici que le bloc proxy.
+#
+# Points IMPORTANTS, quel que soit le proxy (nginx, Apache, OpenLiteSpeed…) :
+#   - proxifier vers http://127.0.0.1:3000
+#   - DÉSACTIVER le buffering : sinon la barre de progression (SSE) et le
+#     streaming du fichier sont bloqués jusqu'à la fin.
+#   - timeouts longs : les téléchargements de grosses vidéos peuvent durer.
+#   - augmenter client_max_body_size n'est PAS nécessaire (les réponses sont
+#     sortantes), mais autoriser de gros transferts en sortie l'est.
+
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_http_version 1.1;
+
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # SSE / streaming : ne pas mettre en tampon.
+    proxy_buffering    off;
+    proxy_cache        off;
+    proxy_set_header   Connection "";
+
+    # Téléchargements longs.
+    proxy_read_timeout  3600s;
+    proxy_send_timeout  3600s;
+}

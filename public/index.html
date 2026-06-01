@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#5b8cff" />
+    <meta name="description" content="Télécharge des vidéos en MP4 via yt-dlp." />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="icon" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>DownLL — Téléchargeur vidéo</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <div class="logo" aria-hidden="true">⬇</div>
+        <h1>DownLL</h1>
+        <p class="tagline">Colle un lien, récupère la vidéo en MP4.</p>
+      </header>
+
+      <form id="form" class="card" autocomplete="off">
+        <label class="field">
+          <span class="sr-only">Lien de la vidéo</span>
+          <input
+            id="url"
+            type="url"
+            inputmode="url"
+            placeholder="https://… (YouTube, Vimeo, X, TikTok…)"
+            required
+          />
+        </label>
+        <button id="analyze" type="submit" class="btn primary">Analyser</button>
+      </form>
+
+      <section id="result" class="card result hidden" aria-live="polite">
+        <div class="media">
+          <img id="thumb" alt="" />
+          <div class="meta">
+            <h2 id="title"></h2>
+            <p id="sub" class="sub"></p>
+          </div>
+        </div>
+
+        <div class="quality">
+          <span class="quality-label">Qualité</span>
+          <div id="qualities" class="chips"></div>
+        </div>
+
+        <button id="download" type="button" class="btn primary">Télécharger</button>
+
+        <div id="progress" class="progress hidden">
+          <div class="bar"><div id="barFill" class="bar-fill"></div></div>
+          <p id="progressText" class="progress-text"></p>
+        </div>
+
+        <a id="getfile" class="btn success hidden" download>⬇ Enregistrer le fichier</a>
+      </section>
+
+      <p id="error" class="error hidden" role="alert"></p>
+
+      <button id="install" class="btn ghost hidden">📲 Installer l'application</button>
+
+      <div id="iosHint" class="ioshint hidden">
+        <span class="ioshint-icon" aria-hidden="true">📲</span>
+        <p>
+          Pour installer sur iPhone/iPad : appuie sur <strong>Partager</strong>
+          <span aria-hidden="true">（⬆️）</span> puis
+          <strong>« Sur l'écran d'accueil »</strong>.
+        </p>
+        <button id="iosHintClose" type="button" class="ioshint-close" aria-label="Fermer">
+          ✕
+        </button>
+      </div>
+
+      <footer class="foot">
+        <p>Respecte les droits d'auteur et les conditions des plateformes.</p>
+      </footer>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

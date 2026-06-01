@@ -1,0 +1,22 @@
+# Compose pour TESTER DownLL en local (Windows/Mac/Linux).
+# Lancement le plus simple sur Windows :  double-clic sur test-docker.cmd
+# ou :  pwsh ./scripts/docker-test.ps1
+#
+# Le port hôte est configurable via HOST_PORT (défaut 3000).
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: downll:test
+    container_name: downll-test
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+      - MAX_CONCURRENT=3
+    tmpfs:
+      - /tmp/downll

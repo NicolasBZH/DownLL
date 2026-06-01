@@ -1,0 +1,21 @@
+{
+  "name": "downll",
+  "version": "1.0.0",
+  "description": "Site de téléchargement vidéo (MP4) basé sur yt-dlp — sans base de données, installable en PWA sur mobile.",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "icons": "node scripts/gen-icons.js",
+    "postinstall": "node scripts/gen-icons.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.4.0"
+  },
+  "license": "MIT"
+}
