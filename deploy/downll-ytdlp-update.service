@@ -1,0 +1,11 @@
+[Unit]
+Description=Mise à jour de yt-dlp (canal nightly) pour DownLL
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Bascule/maintient yt-dlp sur le canal nightly. DownLL relance yt-dlp en
+# sous-processus à chaque téléchargement : le binaire à jour est repris
+# automatiquement, sans redémarrer le service.
+ExecStart=/usr/local/bin/yt-dlp --update-to nightly

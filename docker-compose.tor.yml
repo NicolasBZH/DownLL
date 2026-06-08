@@ -1,0 +1,25 @@
+# Override OPTIONNEL : ajoute un proxy Tor à DownLL.
+#
+# Le compose de base (docker-compose.yml) reste léger et sans Tor.
+# Pour activer Tor, empile cet override :
+#
+#   docker compose -f docker-compose.yml -f docker-compose.tor.yml up -d --build
+#
+# La case « Via Tor » apparaît alors dans l'interface : chaque téléchargement
+# peut être routé (ou non) via Tor, avec une IP de sortie différente par job.
+# Sans cet override, l'option n'est pas proposée (PROXY non défini).
+
+services:
+  app:
+    environment:
+      - PROXY=socks5h://tor:9050
+    depends_on:
+      tor:
+        condition: service_healthy
+
+  tor:
+    build:
+      context: ./deploy/tor
+    image: downll-tor:latest
+    container_name: downll-tor
+    restart: unless-stopped

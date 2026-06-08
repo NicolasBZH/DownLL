@@ -1,2 +1,7 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Les scripts shell DOIVENT rester en LF, sinon le shebang casse une fois
+# copiés dans un conteneur Linux (« no such file or directory »).
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf

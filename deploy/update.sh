@@ -15,10 +15,10 @@ fi
 
 cd "$APP_DIR"
 
-echo "==> Mise à jour de yt-dlp…"
-/usr/local/bin/yt-dlp -U 2>/dev/null || \
-  curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-    -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp
+echo "==> Mise à jour de yt-dlp (nightly)…"
+/usr/local/bin/yt-dlp --update-to nightly 2>/dev/null || { \
+  curl -L https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/latest/download/yt-dlp \
+    -o /usr/local/bin/yt-dlp && chmod a+rx /usr/local/bin/yt-dlp; }
 
 if [[ -d .git ]]; then
   echo "==> Récupération du code (git pull)…"

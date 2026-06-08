@@ -32,6 +32,11 @@
             required
           />
         </label>
+        <label id="proxyRow" class="proxy-row hidden">
+          <input type="checkbox" id="proxyToggle" />
+          <span>Via Tor — autre IP, plus lent (utile si l'accès est bloqué)</span>
+        </label>
+
         <button id="analyze" type="submit" class="btn primary">Analyser</button>
       </form>
 
@@ -54,6 +59,7 @@
         <div id="progress" class="progress hidden">
           <div class="bar"><div id="barFill" class="bar-fill"></div></div>
           <p id="progressText" class="progress-text"></p>
+          <button id="cancel" type="button" class="btn ghost hidden">Annuler</button>
         </div>
 
         <a id="getfile" class="btn success hidden" download>⬇ Enregistrer le fichier</a>

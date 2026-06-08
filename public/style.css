@@ -132,6 +132,24 @@ body {
   color: var(--text);
 }
 
+.proxy-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.proxy-row input {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
 .result .media {
   display: flex;
   gap: 12px;
@@ -203,6 +221,25 @@ body {
   width: 0%;
   background: linear-gradient(90deg, var(--primary), #7c3ad6);
   transition: width 0.3s ease;
+}
+
+/* Phase de finalisation (fusion ffmpeg) : pas de %, on anime la barre pleine. */
+.bar-fill.indeterminate {
+  width: 100% !important;
+  background: linear-gradient(
+    90deg,
+    var(--primary) 0%,
+    #7c3ad6 50%,
+    var(--primary) 100%
+  );
+  background-size: 200% 100%;
+  animation: barShift 1.1s linear infinite;
+}
+
+@keyframes barShift {
+  to {
+    background-position: -200% 0;
+  }
 }
 
 .progress-text {

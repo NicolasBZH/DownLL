@@ -18,11 +18,17 @@
     Affiche les logs du conteneur en direct.
 
 .PARAMETER Rebuild
-    Reconstruit l'image sans cache.
+    Reconstruit l'image sans cache (force un yt-dlp tout neuf dans l'image).
+
+.PARAMETER Tor
+    Empile l'override Tor (docker-compose.tor.yml) : démarre un sidecar Tor et
+    fait apparaître la case « Via Tor » dans l'app. Reproduit le futur setup Linux.
 
 .EXAMPLE
     .\scripts\docker-test.ps1
     .\scripts\docker-test.ps1 -Port 8080
+    .\scripts\docker-test.ps1 -Tor
+    .\scripts\docker-test.ps1 -Rebuild
     .\scripts\docker-test.ps1 -Logs
     .\scripts\docker-test.ps1 -Down
 #>
@@ -31,7 +37,8 @@ param(
     [int]$Port = 3000,
     [switch]$Down,
     [switch]$Logs,
-    [switch]$Rebuild
+    [switch]$Rebuild,
+    [switch]$Tor
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,24 +60,34 @@ function Assert-Docker {
 # Le port hôte est lu par docker-compose.yml via HOST_PORT.
 $env:HOST_PORT = "$Port"
 
+# Fichiers compose à empiler : base + (optionnel) override Tor. Utilisés pour
+# TOUTES les commandes (up/down/logs/build) afin de rester cohérent.
+$composeArgs = @('-f', 'docker-compose.yml')
+if ($Tor) {
+    $composeArgs += @('-f', 'docker-compose.tor.yml')
+    Write-Host "🧅 Mode Tor activé : sidecar Tor + case « Via Tor » dans l'app." -ForegroundColor Magenta
+}
+$torSuffix = if ($Tor) { ' -Tor' } else { '' }
+
 Assert-Docker
 
 if ($Down) {
-    Write-Host "⏹  Arrêt du conteneur de test…" -ForegroundColor Yellow
-    docker compose down
+    Write-Host "⏹  Arrêt et suppression des conteneurs de test…" -ForegroundColor Yellow
+    # --remove-orphans nettoie aussi le sidecar Tor même sans -Down -Tor.
+    docker compose @composeArgs down --remove-orphans
     exit 0
 }
 
 if ($Logs) {
-    docker compose logs -f
+    docker compose @composeArgs logs -f
     exit 0
 }
 
-Write-Host "🐳 Construction de l'image (yt-dlp + ffmpeg inclus)…" -ForegroundColor Cyan
+Write-Host "🐳 Construction de l'image (yt-dlp nightly + ffmpeg inclus)…" -ForegroundColor Cyan
 if ($Rebuild) {
-    docker compose build --no-cache
+    docker compose @composeArgs build --no-cache
 }
-docker compose up -d --build
+docker compose @composeArgs up -d --build --remove-orphans
 if ($LASTEXITCODE -ne 0) {
     Write-Host "❌ Échec du démarrage Docker (le port $Port est peut-être déjà pris)." -ForegroundColor Red
     Write-Host "   Réessaie avec un autre port :  .\scripts\docker-test.ps1 -Port 8080"
@@ -78,10 +95,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $url = "http://localhost:$Port"
-Write-Host "⏳ Attente du démarrage sur $url …"
+# Le démarrage inclut la mise à jour de yt-dlp (nightly). Avec -Tor, on attend
+# en plus que le sidecar soit sain (depends_on) + le bootstrap du circuit.
+$maxTries = if ($Tor) { 120 } else { 60 }
+Write-Host "⏳ Attente du démarrage sur $url (jusqu'à $maxTries s)…"
 
 $ready = $false
-for ($i = 0; $i -lt 40; $i++) {
+for ($i = 0; $i -lt $maxTries; $i++) {
     try {
         $resp = Invoke-WebRequest -UseBasicParsing -Uri "$url/api/health" -TimeoutSec 2
         if ($resp.StatusCode -eq 200) { $ready = $true; break }
@@ -94,13 +114,19 @@ if ($ready) {
     Write-Host ""
     Write-Host "✅ DownLL est prêt : $url" -ForegroundColor Green
     Write-Host "   (sur localhost, la PWA est testable et installable depuis Chrome)" -ForegroundColor DarkGray
+    if ($Tor) {
+        Write-Host "   🧅 Coche « Via Tor » dans l'app pour router via le sidecar Tor." -ForegroundColor Magenta
+    }
     Start-Process $url
     Write-Host ""
     Write-Host "Commandes utiles :"
-    Write-Host "   Logs en direct : .\scripts\docker-test.ps1 -Logs"
+    Write-Host "   Logs en direct : .\scripts\docker-test.ps1 -Logs$torSuffix"
     Write-Host "   Arrêter        : .\scripts\docker-test.ps1 -Down"
+    if (-not $Tor) {
+        Write-Host "   Tester via Tor : .\scripts\docker-test.ps1 -Tor" -ForegroundColor Magenta
+    }
 } else {
     Write-Host "❌ L'application n'a pas répondu à temps. Derniers logs :" -ForegroundColor Red
-    docker compose logs --tail 50
+    docker compose @composeArgs logs --tail 50
     exit 1
 }

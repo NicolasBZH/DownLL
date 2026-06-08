@@ -31,6 +31,13 @@ const MAX_DURATION_S = parseInt(process.env.MAX_DURATION_S || '0', 10); // 0 = i
 const MAX_FILESIZE = process.env.MAX_FILESIZE || ''; // ex: "3G" (vide = illimité)
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT || '3', 10);
 const TRUST_PROXY = process.env.TRUST_PROXY || '1'; // derrière Caddy/Nginx
+// Proxy sortant optionnel pour yt-dlp (Tor, VPN, proxy HTTP/SOCKS).
+// Ex: "socks5h://tor:9050". Vide = connexion directe.
+const PROXY = process.env.PROXY || '';
+// Impersonation TLS « navigateur » (nécessite curl_cffi côté yt-dlp).
+// Ex: "chrome". Vide = désactivé. Contourne les blocages anti-bot (ex. 410
+// PornHub). Activé par défaut dans l'image Docker (curl_cffi fourni).
+const IMPERSONATE = process.env.IMPERSONATE || '';
 
 // ---------------------------------------------------------------------------
 // État en mémoire
@@ -69,6 +76,29 @@ function formatSelectorFor(quality) {
   }
   const h = preset.height;
   return `bv*[height<=${h}]+ba/b[height<=${h}]`;
+}
+
+/**
+ * Construit les arguments `--proxy` pour yt-dlp si un proxy est configuré.
+ * Pour Tor (socks5), on injecte un identifiant SOCKS unique (`token`) afin de
+ * forcer un circuit — et donc une IP de sortie — différent par requête
+ * (Tor isole les flux par IsolateSOCKSAuth, actif par défaut).
+ * @param {string} token  Jeton d'isolation (ex: id du job).
+ * @returns {string[]}
+ */
+function proxyArgsFor(token) {
+  if (!PROXY) return [];
+  let url = PROXY;
+  // Sur un proxy SOCKS sans auth explicite, on rend le circuit unique par token.
+  if (/^socks5h?:\/\//i.test(PROXY) && !PROXY.includes('@')) {
+    url = PROXY.replace(/^(socks5h?:\/\/)/i, `$1dll${token}:x@`);
+  }
+  return ['--proxy', url];
+}
+
+/** Args d'impersonation TLS pour yt-dlp (vide si non configuré). */
+function impersonateArgs() {
+  return IMPERSONATE ? ['--impersonate', IMPERSONATE] : [];
 }
 
 /** Lance yt-dlp et renvoie {stdout, stderr, code} ; tue le process au timeout. */
@@ -134,6 +164,8 @@ async function startDownload(job) {
   ];
   if (MAX_FILESIZE) args.push('--max-filesize', MAX_FILESIZE);
   if (MAX_DURATION_S > 0) args.push('--match-filter', `duration<=${MAX_DURATION_S}`);
+  args.push(...impersonateArgs());
+  if (job.proxy) args.push(...proxyArgsFor(job.id));
   args.push(job.url);
 
   return new Promise((resolve) => {
@@ -145,12 +177,22 @@ async function startDownload(job) {
       const lines = chunk.toString().split(/\r?\n/);
       for (const line of lines) {
         const idx = line.indexOf('DLP ');
-        if (idx === -1) continue;
-        const [pct, speed, eta] = line.slice(idx + 4).split('|');
-        const m = /([\d.]+)\s*%/.exec(pct || '');
-        if (m) job.percent = Math.min(100, parseFloat(m[1]));
-        job.speed = (speed || '').trim();
-        job.eta = (eta || '').trim();
+        if (idx !== -1) {
+          const [pct, speed, eta] = line.slice(idx + 4).split('|');
+          const m = /([\d.]+)\s*%/.exec(pct || '');
+          if (m) job.percent = Math.min(100, parseFloat(m[1]));
+          job.speed = (speed || '').trim();
+          job.eta = (eta || '').trim();
+          job.phase = 'download';
+          continue;
+        }
+        // Post-traitement (fusion vidéo+audio, remux, fixup) : il a lieu après
+        // le téléchargement, sans pourcentage -> on signale « finalisation ».
+        if (/\[(Merger|VideoRemuxer|VideoConvertor|ExtractAudio|Fixup\w*|Embed\w*)\]/.test(line)) {
+          job.phase = 'postprocess';
+          job.speed = '';
+          job.eta = '';
+        }
       }
     });
 
@@ -166,6 +208,11 @@ async function startDownload(job) {
 
     child.on('close', async (code) => {
       job.proc = null;
+      if (job.canceled) {
+        job.status = 'canceled';
+        await cleanupJob(job);
+        return resolve();
+      }
       if (code !== 0) {
         job.status = 'error';
         job.error = stderrTail.trim() || `yt-dlp a quitté avec le code ${code}.`;
@@ -242,20 +289,22 @@ const apiLimiter = rateLimit({
 app.use('/api/', apiLimiter);
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, active: activeDownloads, jobs: jobs.size });
+  res.json({ ok: true, active: activeDownloads, jobs: jobs.size, proxy: !!PROXY });
 });
 
 // --- Métadonnées de la vidéo --------------------------------------------------
 app.post('/api/info', async (req, res) => {
   const url = (req.body && req.body.url || '').trim();
+  const useProxy = !!(req.body && req.body.proxy) && !!PROXY;
   if (!isValidUrl(url)) {
     return res.status(400).json({ error: 'URL invalide.' });
   }
   try {
-    const { stdout, stderr, code } = await runYtdlp(
-      ['-J', '--no-playlist', '--no-warnings', '--no-color', url],
-      { timeoutMs: INFO_TIMEOUT_MS }
-    );
+    const args = ['-J', '--no-playlist', '--no-warnings', '--no-color'];
+    args.push(...impersonateArgs());
+    if (useProxy) args.push(...proxyArgsFor(crypto.randomBytes(6).toString('hex')));
+    args.push(url);
+    const { stdout, stderr, code } = await runYtdlp(args, { timeoutMs: INFO_TIMEOUT_MS });
     if (code !== 0) {
       return res.status(422).json({
         error: 'Impossible de lire cette URL.',
@@ -290,6 +339,7 @@ app.post('/api/info', async (req, res) => {
 app.post('/api/download', (req, res) => {
   const url = (req.body && req.body.url || '').trim();
   const quality = (req.body && req.body.quality) || 'best';
+  const useProxy = !!(req.body && req.body.proxy) && !!PROXY;
   if (!isValidUrl(url)) {
     return res.status(400).json({ error: 'URL invalide.' });
   }
@@ -304,12 +354,15 @@ app.post('/api/download', (req, res) => {
     quality,
     status: 'queued',
     percent: 0,
+    phase: 'queued',
     speed: '',
     eta: '',
     fileName: null,
     filePath: null,
     error: null,
     proc: null,
+    canceled: false,
+    proxy: useProxy,
     createdAt: Date.now(),
     readyAt: null,
   };
@@ -317,6 +370,26 @@ app.post('/api/download', (req, res) => {
   queue.push(job);
   pump();
   res.json({ jobId: id });
+});
+
+// --- Annulation d'un téléchargement ------------------------------------------
+app.post('/api/cancel/:id', (req, res) => {
+  const job = jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Job introuvable.' });
+  // Déjà terminé : rien à annuler, on renvoie l'état tel quel.
+  if (job.status === 'done' || job.status === 'error' || job.status === 'canceled') {
+    return res.json({ ok: true, status: job.status });
+  }
+  job.canceled = true;
+  job.status = 'canceled';
+  if (job.proc) {
+    // Le SIGKILL déclenche le handler `close` -> cleanupJob + libère un slot.
+    job.proc.kill('SIGKILL');
+  } else {
+    // Encore en file d'attente (pump l'ignorera) : on nettoie tout de suite.
+    cleanupJob(job);
+  }
+  res.json({ ok: true, status: 'canceled' });
 });
 
 // --- Progression en temps réel (SSE) -----------------------------------------
@@ -336,6 +409,7 @@ app.get('/api/progress/:id', (req, res) => {
       `data: ${JSON.stringify({
         status: job.status,
         percent: job.percent,
+        phase: job.phase,
         speed: job.speed,
         eta: job.eta,
         fileName: job.fileName,
@@ -346,7 +420,7 @@ app.get('/api/progress/:id', (req, res) => {
   send();
   const iv = setInterval(() => {
     send();
-    if (job.status === 'done' || job.status === 'error') {
+    if (job.status === 'done' || job.status === 'error' || job.status === 'canceled') {
       clearInterval(iv);
       res.end();
     }
@@ -375,24 +449,52 @@ app.use(
   })
 );
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`DownLL en écoute sur http://localhost:${PORT}`);
   console.log(`Dossier temporaire : ${TMP_DIR}`);
 });
+
+// ---------------------------------------------------------------------------
+// Arrêt propre : on tue les yt-dlp en cours et on ferme le serveur avant de
+// rendre la main à systemd/Docker (sinon les sous-processus restent orphelins).
+// ---------------------------------------------------------------------------
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n${signal} reçu — arrêt en cours…`);
+  for (const job of jobs.values()) {
+    if (job.proc) {
+      try {
+        job.proc.kill('SIGKILL');
+      } catch {
+        /* déjà mort */
+      }
+    }
+  }
+  server.close(() => process.exit(0));
+  // Filet de sécurité si des connexions (SSE ouvertes) tardent à se fermer.
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 /**
  * @typedef {Object} Job
  * @property {string} id
  * @property {string} url
  * @property {string} quality
- * @property {'queued'|'downloading'|'done'|'error'} status
+ * @property {'queued'|'downloading'|'done'|'error'|'canceled'} status
  * @property {number} percent
+ * @property {'queued'|'download'|'postprocess'} phase
  * @property {string} speed
  * @property {string} eta
  * @property {string|null} fileName
  * @property {string|null} filePath
  * @property {string|null} error
  * @property {import('child_process').ChildProcess|null} proc
+ * @property {boolean} canceled
+ * @property {boolean} proxy
  * @property {number} createdAt
  * @property {number|null} readyAt
  */

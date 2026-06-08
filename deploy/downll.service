@@ -18,6 +18,9 @@ Environment=TRUST_PROXY=1
 Environment=TMP_DIR=/tmp/downll
 Environment=HOME=/tmp
 Environment=MAX_CONCURRENT=3
+# Impersonation TLS « navigateur » (curl_cffi installé par install.sh).
+# Contourne les blocages anti-bot type « HTTP 410 Gone ». Vider pour désactiver.
+Environment=IMPERSONATE=chrome
 # Limites anti-abus optionnelles :
 # Environment=MAX_DURATION_S=10800
 # Environment=MAX_FILESIZE=4G

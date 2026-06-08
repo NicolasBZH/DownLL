@@ -13,9 +13,12 @@ const downloadBtn = $('download');
 const progress = $('progress');
 const barFill = $('barFill');
 const progressText = $('progressText');
+const cancelBtn = $('cancel');
 const getFile = $('getfile');
 const errorEl = $('error');
 const installBtn = $('install');
+const proxyRow = $('proxyRow');
+const proxyToggle = $('proxyToggle');
 
 const ALL_QUALITIES = [
   { key: 'best', label: 'Meilleure', height: Infinity },
@@ -27,6 +30,17 @@ const ALL_QUALITIES = [
 let current = null; // { url }
 let selectedQuality = 'best';
 let activeSource = null;
+let currentJobId = null;
+
+// L'option « Via Tor » n'est montrée que si le serveur expose un proxy.
+fetch('/api/health')
+  .then((r) => r.json())
+  .then((d) => {
+    if (d && d.proxy) proxyRow.classList.remove('hidden');
+  })
+  .catch(() => {});
+
+const useProxy = () => !!(proxyToggle && proxyToggle.checked);
 
 function showError(msg) {
   errorEl.textContent = msg;
@@ -53,7 +67,11 @@ function resetResultUI() {
   getFile.classList.add('hidden');
   getFile.removeAttribute('href');
   barFill.style.width = '0%';
+  barFill.classList.remove('indeterminate');
   progressText.textContent = '';
+  cancelBtn.classList.add('hidden');
+  cancelBtn.disabled = false;
+  currentJobId = null;
   downloadBtn.disabled = false;
   downloadBtn.textContent = 'Télécharger';
   if (activeSource) {
@@ -101,7 +119,7 @@ form.addEventListener('submit', async (e) => {
     const res = await fetch('/api/info', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, proxy: useProxy() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || data.error || 'Échec de l’analyse.');
@@ -138,13 +156,14 @@ downloadBtn.addEventListener('click', async () => {
   downloadBtn.disabled = true;
   downloadBtn.innerHTML = '<span class="spin"></span>Préparation…';
   progress.classList.remove('hidden');
+  cancelBtn.classList.remove('hidden');
   progressText.textContent = 'En file d’attente…';
 
   try {
     const res = await fetch('/api/download', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: current.url, quality: selectedQuality }),
+      body: JSON.stringify({ url: current.url, quality: selectedQuality, proxy: useProxy() }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Échec du démarrage.');
@@ -156,6 +175,7 @@ downloadBtn.addEventListener('click', async () => {
 });
 
 function trackProgress(jobId) {
+  currentJobId = jobId;
   const source = new EventSource(`/api/progress/${jobId}`);
   activeSource = source;
   source.onmessage = (ev) => {
@@ -168,20 +188,33 @@ function trackProgress(jobId) {
     if (data.status === 'downloading') {
       const pct = Math.round(data.percent || 0);
       barFill.style.width = `${pct}%`;
-      const extra = [data.speed, data.eta && `ETA ${data.eta}`].filter(Boolean).join(' · ');
-      progressText.textContent = `${pct}%${extra ? ' · ' + extra : ''}`;
+      // La fusion vidéo+audio (ffmpeg) a lieu après 100 % et n'a pas de %.
+      if (data.phase === 'postprocess' || pct >= 100) {
+        barFill.classList.add('indeterminate');
+        progressText.textContent = 'Finalisation…';
+      } else {
+        barFill.classList.remove('indeterminate');
+        const extra = [data.speed, data.eta && `ETA ${data.eta}`].filter(Boolean).join(' · ');
+        progressText.textContent = `${pct}%${extra ? ' · ' + extra : ''}`;
+      }
     } else if (data.status === 'queued') {
       progressText.textContent = 'En file d’attente…';
     } else if (data.status === 'done') {
       source.close();
       activeSource = null;
+      barFill.classList.remove('indeterminate');
       barFill.style.width = '100%';
       progressText.textContent = 'Prêt !';
+      cancelBtn.classList.add('hidden');
       downloadBtn.classList.add('hidden');
       getFile.href = `/api/file/${jobId}`;
       getFile.classList.remove('hidden');
       // Sur mobile, on déclenche directement l'enregistrement.
       getFile.click();
+    } else if (data.status === 'canceled') {
+      source.close();
+      activeSource = null;
+      resetResultUI();
     } else if (data.status === 'error') {
       source.close();
       activeSource = null;
@@ -202,6 +235,21 @@ getFile.addEventListener('click', () => {
     downloadBtn.disabled = false;
     downloadBtn.textContent = 'Télécharger à nouveau';
   }, 800);
+});
+
+// --- Annulation --------------------------------------------------------------
+cancelBtn.addEventListener('click', async () => {
+  if (!currentJobId) return;
+  const id = currentJobId;
+  cancelBtn.disabled = true;
+  progressText.textContent = 'Annulation…';
+  try {
+    await fetch(`/api/cancel/${id}`, { method: 'POST' });
+  } catch {
+    /* le serveur finira par nettoyer le job de toute façon */
+  }
+  // On remet l'UI à zéro tout de suite, sans attendre l'écho SSE.
+  resetResultUI();
 });
 
 // --- Installation PWA --------------------------------------------------------

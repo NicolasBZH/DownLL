@@ -1,0 +1,12 @@
+[Unit]
+Description=Mise à jour quotidienne de yt-dlp pour DownLL
+
+[Timer]
+OnCalendar=daily
+# Rattrape l'exécution manquée si le serveur était éteint.
+Persistent=true
+# Étale l'horaire pour ne pas marteler GitHub à minuit pile.
+RandomizedDelaySec=1h
+
+[Install]
+WantedBy=timers.target
