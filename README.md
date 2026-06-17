@@ -193,6 +193,68 @@ bare-metal, `install.sh` installe `curl_cffi`). Vider `IMPERSONATE` pour désact
 
 ---
 
+## Navigateur intégré (option)
+
+Depuis la **barre de menu en haut**, l'onglet **« 🌐 Navigateur »** pilote un
+**vrai Chromium côté serveur** (Playwright), streamé dans la page : tu navigues
+(clics, **clavier mobile** avec IME, **gestes tactiles natifs** pincer/défiler,
+**login**, **age-gate**, suivi des **nouveaux onglets/popups**), avec **Tor en
+option** et un **sélecteur de qualité** du flux (Auto/Net/Fluide). Le bouton **⬇**
+télécharge la vidéo de la page courante — en réutilisant **l'URL ET les cookies**
+de ta session (donc les contenus derrière connexion/âge passent).
+
+**Activation** : définis `AUTH_PASSWORD` (le navigateur est lié à l'auth, sinon
+ce serait un proxy ouvert). En Docker :
+
+```bash
+AUTH_PASSWORD=tonmotdepasse docker compose up -d --build
+# test local Windows : .\scripts\docker-test.ps1 -Auth tonmotdepasse
+```
+
+**Nouvelle IP (Tor).** Quand le navigateur tourne via Tor, un bouton **🔄** dans
+la barre renouvelle le circuit (`SIGNAL NEWNYM` via le port de contrôle Tor) →
+nouvelle IP de sortie, puis recharge la page. Le port de contrôle est activé par
+l'override Tor (`TOR_CONTROL_PASSWORD`, défaut `downll-tor`, réseau Docker interne).
+*(Pour les téléchargements, l'IP change déjà automatiquement à chaque job.)*
+
+**Anti-détection.** Le navigateur applique des correctifs *stealth* (masque
+`navigator.webdriver`, UA réaliste, fuseau/locale FR…) et tourne par défaut en
+**mode visible (headful) via Xvfb** (`BROWSER_HEADFUL=1`), bien moins détectable
+que headless — ça passe même le « trafic exceptionnel » de Google. Mettre
+`BROWSER_HEADFUL=0` pour revenir en headless (plus léger, mais plus repérable).
+
+**Mode HD + son.** Un bouton **HD** dans la barre bascule du flux d'images (SD,
+léger) vers un **vrai flux vidéo H.264 + audio AAC** : ffmpeg capture l'écran
+(Xvfb) et le son (PulseAudio) du Chromium, encode en MP4 fragmenté envoyé en
+**WebSocket** et lu par `MediaSource` dans une `<video>` → **fluide + SON**, le
+tout en TCP (aucun port UDP, contrairement au WebRTC). Une session HD à la fois,
+720p, latence **~1,5 s** (l'audio PulseAudio en est le plancher — la vidéo seule
+serait ~0,6 s). Pour de l'**interaction à faible latence**, le mode **SD** (images,
+sans son) reste plus réactif. Nécessite `BROWSER_HEADFUL=1` (défaut en Docker).
+
+**Mode « 📺 Live » (Neko — WebRTC + son, ~0,2 s).** Pour le **meilleur ressenti
+son+vidéo synchro et basse latence**, DownLL peut embarquer [Neko](https://github.com/m1k1o/neko)
+(navigateur WebRTC en sidecar) dans un onglet **Live** (iframe). Activation :
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.neko.yml up -d --build
+# test local : .\scripts\docker-test.ps1 -Auth tonmotdepasse -Neko
+```
+
+L'onglet « 📺 Live » apparaît si `NEKO_URL` est défini. Compromis : Neko est un
+navigateur **séparé** → pas de bouton ⬇ intégré (copie l'URL dans « Téléchargeur »).
+**WebRTC = port UDP** : en local la plage publiée suffit ; sur un **serveur derrière
+ton panel**, expose la plage UDP, mets `NEKO_WEBRTC_NAT1TO1` = IP publique, et
+`NEKO_URL` = ton URL Neko proxifiée. *(Le mode HD/MSE reste l'option « tout TCP,
+avec ⬇ » ; Neko l'option « latence minimale ».)*
+
+> ⚠️ **À savoir.** L'image embarque Chromium + Xvfb (~+450 Mo). Chaque session
+> active consomme ~0,5–1 Go de RAM (`MAX_BROWSER_SESSIONS` limite le parallélisme,
+> GC auto après 5 min d'inactivité). Le rendu est *streamé* : net mais pas
+> natif-lisse, surtout via Tor. **Ne jamais exposer sans `AUTH_PASSWORD`.**
+
+---
+
 ## Configuration (variables d'environnement)
 
 Définies dans le service systemd ([`deploy/downll.service`](deploy/downll.service)).
@@ -210,6 +272,10 @@ Définies dans le service systemd ([`deploy/downll.service`](deploy/downll.servi
 | `TRUST_PROXY`     | `1`            | Confiance au reverse-proxy du panel          |
 | `PROXY`           | *(vide)*       | Proxy sortant yt-dlp (Tor/VPN/SOCKS/HTTP)    |
 | `IMPERSONATE`     | `chrome`*      | Impersonation TLS navigateur (curl_cffi)     |
+| `AUTH_PASSWORD`   | *(vide)*       | Mot de passe d'accès. Active aussi le navigateur intégré |
+| `MAX_BROWSER_SESSIONS` | `2`       | Sessions de navigateur distant simultanées   |
+| `BROWSER_HEADFUL` | `1` (Docker)   | Navigateur visible via Xvfb (anti-détection) |
+| `NEKO_URL`        | *(vide)*       | URL d'un sidecar Neko -> onglet « 📺 Live »   |
 
 \* `chrome` en Docker et via `install.sh`. Le serveur seul (sans curl_cffi) doit
 laisser `IMPERSONATE` vide, sinon yt-dlp échoue faute de backend d'impersonation.

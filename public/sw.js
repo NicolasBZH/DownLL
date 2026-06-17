@@ -2,12 +2,12 @@
    l'installation PWA et un démarrage hors-ligne. Les appels /api ne sont
    jamais mis en cache. */
 
-const CACHE = 'downll-v4';
+const CACHE = 'downll-v13';
 const SHELL = [
-  '/',
   '/index.html',
   '/style.css',
   '/app.js',
+  '/browser.js',
   '/manifest.json',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
@@ -32,12 +32,23 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Ne jamais intercepter l'API ni les autres origines.
-  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) {
+  // Ne jamais intercepter l'API, les WebSockets, ni les autres origines.
+  if (
+    url.origin !== self.location.origin ||
+    url.pathname.startsWith('/api/') ||
+    url.pathname.startsWith('/ws/')
+  ) {
     return;
   }
 
-  // Coquille statique : cache d'abord, réseau ensuite.
+  // Navigations (la page « / ») : réseau d'abord -> l'écran de login s'affiche
+  // si la session a expiré ; repli sur le cache hors-ligne seulement.
+  if (request.mode === 'navigate') {
+    event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+    return;
+  }
+
+  // Assets statiques : cache d'abord, réseau ensuite.
   event.respondWith(
     caches.match(request).then((cached) => {
       return (

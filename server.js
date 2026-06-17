@@ -18,6 +18,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
+const auth = require('./lib/auth');
+const browser = require('./lib/browser');
+const hdBrowser = require('./lib/hd-browser');
 
 // ---------------------------------------------------------------------------
 // Configuration (tout est surchargeable via variables d'environnement)
@@ -38,6 +41,13 @@ const PROXY = process.env.PROXY || '';
 // Ex: "chrome". Vide = désactivé. Contourne les blocages anti-bot (ex. 410
 // PornHub). Activé par défaut dans l'image Docker (curl_cffi fourni).
 const IMPERSONATE = process.env.IMPERSONATE || '';
+// Navigateur intégré : exige l'auth (sinon ce serait un proxy ouvert) ET
+// playwright installé. Désactivable explicitement avec BROWSER=0.
+const BROWSER_ENABLED = auth.enabled() && browser.available && process.env.BROWSER !== '0';
+// Mode HD (vidéo+son via ffmpeg/MSE) : nécessite le mode headful (Xvfb+PulseAudio).
+const HD_ENABLED = BROWSER_ENABLED && hdBrowser.available && process.env.BROWSER_HEADFUL === '1';
+// URL (côté navigateur) d'un sidecar Neko (navigateur WebRTC + son). Vide = pas d'onglet Live.
+const NEKO_URL = process.env.NEKO_URL || '';
 
 // ---------------------------------------------------------------------------
 // État en mémoire
@@ -128,6 +138,37 @@ function runYtdlp(args, { timeoutMs = 0 } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Création d'un job (utilisé par l'API ET par le navigateur intégré)
+// ---------------------------------------------------------------------------
+function createJob({ url, quality = 'best', proxy = false, cookiesFile = null }) {
+  const id = crypto.randomBytes(9).toString('hex');
+  /** @type {Job} */
+  const job = {
+    id,
+    url,
+    quality: QUALITY_PRESETS[quality] ? quality : 'best',
+    status: 'queued',
+    percent: 0,
+    phase: 'queued',
+    speed: '',
+    eta: '',
+    fileName: null,
+    filePath: null,
+    error: null,
+    proc: null,
+    canceled: false,
+    proxy: !!proxy,
+    cookiesFile,
+    createdAt: Date.now(),
+    readyAt: null,
+  };
+  jobs.set(id, job);
+  queue.push(job);
+  pump();
+  return job;
+}
+
+// ---------------------------------------------------------------------------
 // File d'attente de téléchargements (limite la concurrence)
 // ---------------------------------------------------------------------------
 function pump() {
@@ -165,6 +206,7 @@ async function startDownload(job) {
   if (MAX_FILESIZE) args.push('--max-filesize', MAX_FILESIZE);
   if (MAX_DURATION_S > 0) args.push('--match-filter', `duration<=${MAX_DURATION_S}`);
   args.push(...impersonateArgs());
+  if (job.cookiesFile) args.push('--cookies', job.cookiesFile);
   if (job.proxy) args.push(...proxyArgsFor(job.id));
   args.push(job.url);
 
@@ -258,6 +300,13 @@ async function cleanupJob(job) {
   } catch {
     /* ignore */
   }
+  if (job.cookiesFile) {
+    try {
+      await fsp.rm(job.cookiesFile, { force: true });
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 // Nettoyage périodique des jobs expirés.
@@ -288,8 +337,43 @@ const apiLimiter = rateLimit({
 });
 app.use('/api/', apiLimiter);
 
-app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, active: activeDownloads, jobs: jobs.size, proxy: !!PROXY });
+// --- Authentification (login/logout/health restent publics) ------------------
+app.post('/api/login', (req, res) => {
+  if (!auth.enabled()) return res.json({ ok: true });
+  if (!auth.checkPassword(req.body && req.body.password)) {
+    return res.status(401).json({ error: 'Mot de passe incorrect.' });
+  }
+  auth.issueCookie(res);
+  res.json({ ok: true });
+});
+
+app.post('/api/logout', (req, res) => {
+  auth.clearCookie(res);
+  res.json({ ok: true });
+});
+
+app.get('/api/health', (req, res) => {
+  res.json({
+    ok: true,
+    active: activeDownloads,
+    jobs: jobs.size,
+    proxy: !!PROXY,
+    auth: auth.enabled(),
+    authed: auth.isAuthed(req),
+    browser: BROWSER_ENABLED,
+    hd: HD_ENABLED,
+    neko: NEKO_URL,
+  });
+});
+
+// --- Mur d'authentification (tout le reste) ----------------------------------
+app.use((req, res, next) => {
+  if (auth.isAuthed(req)) return next();
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Authentification requise.' });
+  }
+  // Page : on sert l'écran de connexion (autonome, sans assets externes).
+  res.status(401).sendFile(path.join(__dirname, 'public', 'login.html'));
 });
 
 // --- Métadonnées de la vidéo --------------------------------------------------
@@ -346,30 +430,8 @@ app.post('/api/download', (req, res) => {
   if (!QUALITY_PRESETS[quality]) {
     return res.status(400).json({ error: 'Qualité inconnue.' });
   }
-  const id = crypto.randomBytes(9).toString('hex');
-  /** @type {Job} */
-  const job = {
-    id,
-    url,
-    quality,
-    status: 'queued',
-    percent: 0,
-    phase: 'queued',
-    speed: '',
-    eta: '',
-    fileName: null,
-    filePath: null,
-    error: null,
-    proc: null,
-    canceled: false,
-    proxy: useProxy,
-    createdAt: Date.now(),
-    readyAt: null,
-  };
-  jobs.set(id, job);
-  queue.push(job);
-  pump();
-  res.json({ jobId: id });
+  const job = createJob({ url, quality, proxy: useProxy });
+  res.json({ jobId: job.id });
 });
 
 // --- Annulation d'un téléchargement ------------------------------------------
@@ -452,7 +514,30 @@ app.use(
 const server = app.listen(PORT, () => {
   console.log(`DownLL en écoute sur http://localhost:${PORT}`);
   console.log(`Dossier temporaire : ${TMP_DIR}`);
+  console.log(`Authentification : ${auth.enabled() ? 'activée' : 'désactivée'}`);
 });
+
+// --- Navigateur intégré (WebSocket /ws/browser et /ws/hd) --------------------
+let browserHandle = { enabled: false };
+let hdHandle = { enabled: false };
+if (BROWSER_ENABLED) {
+  const opts = { isAuthed: auth.isAuthed, createDownloadJob: createJob, proxy: PROXY, tmpDir: TMP_DIR };
+  browserHandle = browser.setup(opts);
+  if (HD_ENABLED) hdHandle = hdBrowser.setup(opts);
+  // Un seul écouteur d'upgrade WebSocket -> route par chemin (/ws/browser, /ws/hd).
+  server.on('upgrade', (req, socket, head) => {
+    if (browserHandle.handleUpgrade && browserHandle.handleUpgrade(req, socket, head)) return;
+    if (hdHandle.handleUpgrade && hdHandle.handleUpgrade(req, socket, head)) return;
+    socket.destroy();
+  });
+  if (browserHandle.enabled) {
+    console.log('Navigateur intégré : activé.' + (hdHandle.enabled ? ' (+ mode HD son/vidéo)' : ''));
+  }
+} else if (auth.enabled() && !browser.available) {
+  console.log('Navigateur intégré : indisponible (playwright non installé).');
+} else if (!auth.enabled()) {
+  console.log('Navigateur intégré : désactivé (nécessite AUTH_PASSWORD).');
+}
 
 // ---------------------------------------------------------------------------
 // Arrêt propre : on tue les yt-dlp en cours et on ferme le serveur avant de
@@ -472,6 +557,8 @@ function shutdown(signal) {
       }
     }
   }
+  if (browserHandle.shutdown) browserHandle.shutdown();
+  if (hdHandle.shutdown) hdHandle.shutdown();
   server.close(() => process.exit(0));
   // Filet de sécurité si des connexions (SSE ouvertes) tardent à se fermer.
   setTimeout(() => process.exit(0), 3000).unref();
@@ -495,6 +582,7 @@ process.on('SIGINT', () => shutdown('SIGINT'));
  * @property {import('child_process').ChildProcess|null} proc
  * @property {boolean} canceled
  * @property {boolean} proxy
+ * @property {string|null} cookiesFile
  * @property {number} createdAt
  * @property {number|null} readyAt
  */

@@ -19,6 +19,16 @@ const errorEl = $('error');
 const installBtn = $('install');
 const proxyRow = $('proxyRow');
 const proxyToggle = $('proxyToggle');
+const tabDl = $('tabDl');
+const tabBrowser = $('tabBrowser');
+const tabNeko = $('tabNeko');
+const logoutBtn = $('logout');
+const viewDl = $('view-dl');
+const viewBrowser = $('view-browser');
+const viewNeko = $('view-neko');
+const nekoFrame = $('nekoFrame');
+const nekoOpen = $('nekoOpen');
+let nekoUrl = '';
 
 const ALL_QUALITIES = [
   { key: 'best', label: 'Meilleure', height: Infinity },
@@ -32,18 +42,97 @@ let selectedQuality = 'best';
 let activeSource = null;
 let currentJobId = null;
 
-// L'option « Via Tor » n'est montrée que si le serveur expose un proxy.
+// Capacités du serveur : proxy (case Tor), auth (déconnexion), navigateur (onglet).
 fetch('/api/health')
-  .then((r) => r.json())
+  .then((r) => {
+    if (r.status === 401) {
+      location.reload(); // session expirée -> le serveur servira l'écran de login
+      throw new Error('auth');
+    }
+    return r.json();
+  })
   .then((d) => {
-    if (d && d.proxy) proxyRow.classList.remove('hidden');
+    if (!d) return;
+    if (d.proxy) proxyRow.classList.remove('hidden');
+    if (d.auth) logoutBtn.classList.remove('hidden');
+    if (d.browser) tabBrowser.classList.remove('hidden');
+    if (d.neko && tabNeko) {
+      nekoUrl = d.neko;
+      tabNeko.classList.remove('hidden');
+      if (nekoOpen) nekoOpen.href = nekoUrl;
+    }
+    window.DownLL = Object.assign(window.DownLL || {}, {
+      caps: { proxy: !!d.proxy, browser: !!d.browser, hd: !!d.hd, neko: !!d.neko },
+    });
+    document.dispatchEvent(new CustomEvent('downll:caps', { detail: window.DownLL.caps }));
   })
   .catch(() => {});
 
 const useProxy = () => !!(proxyToggle && proxyToggle.checked);
 
+// --- Navigation entre vues (Téléchargeur / Navigateur / Live) ----------------
+function showView(name) {
+  const wide = name === 'browser' || name === 'neko';
+  document.body.classList.toggle('browsing', wide);
+  viewDl.classList.toggle('hidden', name !== 'dl');
+  viewBrowser.classList.toggle('hidden', name !== 'browser');
+  if (viewNeko) viewNeko.classList.toggle('hidden', name !== 'neko');
+  tabDl.classList.toggle('active', name === 'dl');
+  tabBrowser.classList.toggle('active', name === 'browser');
+  if (tabNeko) tabNeko.classList.toggle('active', name === 'neko');
+  // Charge l'iframe Neko au premier affichage seulement.
+  if (name === 'neko' && nekoFrame && !nekoFrame.getAttribute('src') && nekoUrl) {
+    nekoFrame.setAttribute('src', nekoUrl);
+  }
+  document.dispatchEvent(new CustomEvent('downll:view', { detail: { view: name } }));
+}
+tabDl.addEventListener('click', () => showView('dl'));
+tabBrowser.addEventListener('click', () => showView('browser'));
+if (tabNeko) tabNeko.addEventListener('click', () => showView('neko'));
+
+if (logoutBtn) {
+  logoutBtn.addEventListener('click', async () => {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch {
+      /* ignore */
+    }
+    location.reload();
+  });
+}
+
+/**
+ * Suit un téléchargement lancé depuis le navigateur intégré : bascule sur la vue
+ * Téléchargeur et affiche la progression (réutilise le pipeline existant).
+ */
+function trackDownloadJob(jobId, label) {
+  showView('dl');
+  clearError();
+  resetResultUI();
+  thumb.classList.add('hidden');
+  thumb.removeAttribute('src');
+  titleEl.textContent = label || 'Téléchargement';
+  subEl.textContent = 'Depuis le navigateur';
+  qualitiesEl.parentElement.classList.add('hidden');
+  downloadBtn.classList.add('hidden');
+  result.classList.remove('hidden');
+  progress.classList.remove('hidden');
+  cancelBtn.classList.remove('hidden');
+  progressText.textContent = 'En file d’attente…';
+  trackProgress(jobId);
+}
+
+window.DownLL = Object.assign(window.DownLL || {}, { showView, trackDownloadJob });
+
 function showError(msg) {
-  errorEl.textContent = msg;
+  let m = String(msg || '');
+  // Mur anti-bot YouTube/Google : oriente vers la bonne méthode.
+  if (/not a bot|sign in to confirm/i.test(m)) {
+    m +=
+      ' — Astuce : décoche « Via Tor » (les IP Tor sont bloquées par Google), ou ouvre l’onglet ' +
+      '« 🌐 Navigateur », va sur la vidéo puis ⬇ (tes cookies de session passent).';
+  }
+  errorEl.textContent = m;
   errorEl.classList.remove('hidden');
 }
 
@@ -81,6 +170,8 @@ function resetResultUI() {
 }
 
 function renderQualities(maxHeight) {
+  qualitiesEl.parentElement.classList.remove('hidden');
+  downloadBtn.classList.remove('hidden');
   qualitiesEl.innerHTML = '';
   selectedQuality = 'best';
   for (const q of ALL_QUALITIES) {

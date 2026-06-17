@@ -13,6 +13,9 @@ services:
   app:
     environment:
       - PROXY=socks5h://tor:9050
+      # Port de contrôle Tor -> bouton "Nouvelle IP" dans le navigateur intégré.
+      - TOR_CONTROL=tor:9051
+      - TOR_CONTROL_PASSWORD=${TOR_CONTROL_PASSWORD:-downll-tor}
     depends_on:
       tor:
         condition: service_healthy
@@ -22,4 +25,6 @@ services:
       context: ./deploy/tor
     image: downll-tor:latest
     container_name: downll-tor
+    environment:
+      - TOR_CONTROL_PASSWORD=${TOR_CONTROL_PASSWORD:-downll-tor}
     restart: unless-stopped

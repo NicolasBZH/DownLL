@@ -18,5 +18,9 @@ services:
       - PORT=3000
       - NODE_ENV=production
       - MAX_CONCURRENT=3
+      # Mot de passe d'accès. Vide = app ouverte ET navigateur intégré désactivé.
+      # Définis-le (ex. dans un fichier .env) pour activer login + navigateur :
+      #   AUTH_PASSWORD=tonmotdepasse docker compose up -d
+      - AUTH_PASSWORD=${AUTH_PASSWORD:-}
     tmpfs:
       - /tmp/downll

@@ -28,6 +28,18 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
+# Chromium pour le navigateur intégré (Playwright). Chemin fixe pour que le
+# binaire soit retrouvé au runtime (HOME diffère entre build et exécution).
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+# Chromium + Xvfb (écran virtuel) : permet le mode "headful" (BROWSER_HEADFUL=1),
+# beaucoup moins détectable que headless par les sites anti-bot agressifs.
+# PulseAudio : capture le son de Chromium pour le mode "HD + son" (ffmpeg -> MSE).
+RUN npx playwright install --with-deps chromium \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends xvfb pulseaudio pulseaudio-utils \
+  && usermod -aG pulse-access root \
+  && rm -rf /var/lib/apt/lists/*
+
 COPY . .
 RUN node scripts/gen-icons.js \
   && chmod a+rx docker-entrypoint.sh
@@ -37,7 +49,8 @@ ENV NODE_ENV=production \
     TMP_DIR=/tmp/downll \
     HOME=/tmp \
     YTDLP_AUTOUPDATE=1 \
-    IMPERSONATE=chrome
+    IMPERSONATE=chrome \
+    BROWSER_HEADFUL=1
 
 EXPOSE 3000
 

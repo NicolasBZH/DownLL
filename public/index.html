@@ -14,71 +14,160 @@
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <!-- ===================== MENU (barre supérieure) ===================== -->
+    <header class="topbar">
+      <div class="topbar-brand">
+        <span class="topbar-logo" aria-hidden="true">⬇</span>
+        <span>DownLL</span>
+      </div>
+      <nav class="topbar-nav" id="menu">
+        <button class="menu-item active" data-view="dl" id="tabDl" type="button">⬇ Téléchargeur</button>
+        <button class="menu-item hidden" data-view="browser" id="tabBrowser" type="button">🌐 Navigateur</button>
+        <button class="menu-item hidden" data-view="neko" id="tabNeko" type="button">📺 Live</button>
+      </nav>
+      <button class="menu-logout hidden" id="logout" type="button" title="Se déconnecter" aria-label="Se déconnecter">⎋</button>
+    </header>
+
     <main class="app">
-      <header class="hero">
-        <div class="logo" aria-hidden="true">⬇</div>
-        <h1>DownLL</h1>
-        <p class="tagline">Colle un lien, récupère la vidéo en MP4.</p>
-      </header>
+      <!-- ===================== VUE : TÉLÉCHARGEUR ===================== -->
+      <div id="view-dl" class="view">
+        <header class="hero">
+          <div class="logo" aria-hidden="true">⬇</div>
+          <h1>DownLL</h1>
+          <p class="tagline">Colle un lien, récupère la vidéo en MP4.</p>
+        </header>
 
-      <form id="form" class="card" autocomplete="off">
-        <label class="field">
-          <span class="sr-only">Lien de la vidéo</span>
-          <input
-            id="url"
-            type="url"
-            inputmode="url"
-            placeholder="https://… (YouTube, Vimeo, X, TikTok…)"
-            required
-          />
-        </label>
-        <label id="proxyRow" class="proxy-row hidden">
-          <input type="checkbox" id="proxyToggle" />
-          <span>Via Tor — autre IP, plus lent (utile si l'accès est bloqué)</span>
-        </label>
+        <form id="form" class="card" autocomplete="off">
+          <label class="field">
+            <span class="sr-only">Lien de la vidéo</span>
+            <input
+              id="url"
+              type="url"
+              inputmode="url"
+              placeholder="https://… (YouTube, Vimeo, X, TikTok…)"
+              required
+            />
+          </label>
+          <label id="proxyRow" class="proxy-row hidden">
+            <input type="checkbox" id="proxyToggle" />
+            <span>Via Tor — autre IP, plus lent (utile si l'accès est bloqué)</span>
+          </label>
 
-        <button id="analyze" type="submit" class="btn primary">Analyser</button>
-      </form>
+          <button id="analyze" type="submit" class="btn primary">Analyser</button>
+        </form>
 
-      <section id="result" class="card result hidden" aria-live="polite">
-        <div class="media">
-          <img id="thumb" alt="" />
-          <div class="meta">
-            <h2 id="title"></h2>
-            <p id="sub" class="sub"></p>
+        <section id="result" class="card result hidden" aria-live="polite">
+          <div class="media">
+            <img id="thumb" alt="" />
+            <div class="meta">
+              <h2 id="title"></h2>
+              <p id="sub" class="sub"></p>
+            </div>
           </div>
+
+          <div class="quality">
+            <span class="quality-label">Qualité</span>
+            <div id="qualities" class="chips"></div>
+          </div>
+
+          <button id="download" type="button" class="btn primary">Télécharger</button>
+
+          <div id="progress" class="progress hidden">
+            <div class="bar"><div id="barFill" class="bar-fill"></div></div>
+            <p id="progressText" class="progress-text"></p>
+            <button id="cancel" type="button" class="btn ghost hidden">Annuler</button>
+          </div>
+
+          <a id="getfile" class="btn success hidden" download>⬇ Enregistrer le fichier</a>
+        </section>
+
+        <p id="error" class="error hidden" role="alert"></p>
+
+        <button id="install" class="btn ghost hidden">📲 Installer l'application</button>
+
+        <div id="iosHint" class="ioshint hidden">
+          <span class="ioshint-icon" aria-hidden="true">📲</span>
+          <p>
+            Pour installer sur iPhone/iPad : appuie sur <strong>Partager</strong>
+            <span aria-hidden="true">（⬆️）</span> puis
+            <strong>« Sur l'écran d'accueil »</strong>.
+          </p>
+          <button id="iosHintClose" type="button" class="ioshint-close" aria-label="Fermer">
+            ✕
+          </button>
         </div>
+      </div>
 
-        <div class="quality">
-          <span class="quality-label">Qualité</span>
-          <div id="qualities" class="chips"></div>
+      <!-- ===================== VUE : NAVIGATEUR ===================== -->
+      <div id="view-browser" class="view hidden">
+        <div class="bv-toolbar card">
+          <div class="bv-nav">
+            <button id="bvBack" class="bv-btn" type="button" title="Précédent">◀</button>
+            <button id="bvForward" class="bv-btn" type="button" title="Suivant">▶</button>
+            <button id="bvReload" class="bv-btn" type="button" title="Recharger">⟳</button>
+          </div>
+          <form id="bvForm" class="bv-address">
+            <input id="bvUrl" type="text" inputmode="url" autocomplete="off" placeholder="Adresse du site…" />
+          </form>
+          <select id="bvQuality" class="bv-quality" title="Qualité du flux">
+            <option value="auto">Auto</option>
+            <option value="high">Net</option>
+            <option value="low">Fluide</option>
+          </select>
+          <label id="bvTorRow" class="bv-tor hidden" title="Router le navigateur via Tor">
+            <input type="checkbox" id="bvTor" />
+            <span>Tor</span>
+          </label>
+          <button id="bvNewIp" class="bv-btn hidden" type="button" title="Nouvelle IP de sortie Tor">🔄</button>
+          <button id="bvHd" class="bv-btn hidden" type="button" title="HD + son (vidéo fluide)">HD</button>
+          <button id="bvKeyboard" class="bv-btn" type="button" title="Afficher le clavier">⌨</button>
+          <button id="bvDownload" class="btn primary bv-dl" type="button" title="Télécharger la page courante">
+            ⬇
+          </button>
         </div>
-
-        <button id="download" type="button" class="btn primary">Télécharger</button>
-
-        <div id="progress" class="progress hidden">
-          <div class="bar"><div id="barFill" class="bar-fill"></div></div>
-          <p id="progressText" class="progress-text"></p>
-          <button id="cancel" type="button" class="btn ghost hidden">Annuler</button>
+        <div class="bv-stage">
+          <canvas id="bvCanvas" tabindex="0"></canvas>
+          <!-- Mode HD : flux vidéo+son (MediaSource). Masqué tant qu'on est en SD. -->
+          <video id="bvVideo" class="hidden" playsinline></video>
+          <!-- Champ invisible : ouvre le clavier mobile et capte la saisie (IME). -->
+          <input
+            id="bvKeys"
+            class="bv-keys"
+            type="text"
+            autocomplete="off"
+            autocapitalize="off"
+            autocorrect="off"
+            spellcheck="false"
+            aria-hidden="true"
+            tabindex="-1"
+          />
+          <div id="bvStatus" class="bv-status">Tape une adresse ci-dessus pour démarrer.</div>
         </div>
-
-        <a id="getfile" class="btn success hidden" download>⬇ Enregistrer le fichier</a>
-      </section>
-
-      <p id="error" class="error hidden" role="alert"></p>
-
-      <button id="install" class="btn ghost hidden">📲 Installer l'application</button>
-
-      <div id="iosHint" class="ioshint hidden">
-        <span class="ioshint-icon" aria-hidden="true">📲</span>
-        <p>
-          Pour installer sur iPhone/iPad : appuie sur <strong>Partager</strong>
-          <span aria-hidden="true">（⬆️）</span> puis
-          <strong>« Sur l'écran d'accueil »</strong>.
+        <p class="bv-hint">
+          Navigue, connecte-toi / passe l'âge si besoin, puis <strong>⬇</strong> télécharge la vidéo
+          de la page (avec ta session). « Tor » = IP hors-France. Astuce : touche l'écran pour faire
+          apparaître le clavier.
         </p>
-        <button id="iosHintClose" type="button" class="ioshint-close" aria-label="Fermer">
-          ✕
-        </button>
+      </div>
+
+      <!-- ===================== VUE : LIVE (Neko, WebRTC + son) ===================== -->
+      <div id="view-neko" class="view hidden">
+        <div class="neko-bar">
+          <span class="neko-title">📺 Live — navigateur WebRTC fluide + son (Neko)</span>
+          <a id="nekoOpen" class="btn ghost neko-open" target="_blank" rel="noopener">Ouvrir en plein écran ↗</a>
+        </div>
+        <div class="neko-stage">
+          <iframe
+            id="nekoFrame"
+            title="Neko"
+            allow="autoplay; fullscreen; clipboard-read; clipboard-write"
+            allowfullscreen
+          ></iframe>
+        </div>
+        <p class="bv-hint">
+          Pour télécharger une vidéo vue ici : copie son URL et colle-la dans l'onglet
+          <strong>Téléchargeur</strong>. (Si le cadre reste vide, clique « Ouvrir en plein écran ».)
+        </p>
       </div>
 
       <footer class="foot">
@@ -87,5 +176,6 @@
     </main>
 
     <script src="/app.js"></script>
+    <script src="/browser.js"></script>
   </body>
 </html>
