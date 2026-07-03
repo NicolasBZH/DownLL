@@ -22,5 +22,7 @@ services:
       # Définis-le (ex. dans un fichier .env) pour activer login + navigateur :
       #   AUTH_PASSWORD=tonmotdepasse docker compose up -d
       - AUTH_PASSWORD=${AUTH_PASSWORD:-}
+      # Jeton pour l'extension navigateur (envoi de cookies). Voir extension/README.md.
+      - DOWNLL_TOKEN=${DOWNLL_TOKEN:-}
     tmpfs:
       - /tmp/downll

@@ -17,18 +17,15 @@ const cancelBtn = $('cancel');
 const getFile = $('getfile');
 const errorEl = $('error');
 const installBtn = $('install');
+const extBtn = $('extBtn');
+const extHint = $('extHint');
 const proxyRow = $('proxyRow');
 const proxyToggle = $('proxyToggle');
 const tabDl = $('tabDl');
 const tabBrowser = $('tabBrowser');
-const tabNeko = $('tabNeko');
 const logoutBtn = $('logout');
 const viewDl = $('view-dl');
 const viewBrowser = $('view-browser');
-const viewNeko = $('view-neko');
-const nekoFrame = $('nekoFrame');
-const nekoOpen = $('nekoOpen');
-let nekoUrl = '';
 
 const ALL_QUALITIES = [
   { key: 'best', label: 'Meilleure', height: Infinity },
@@ -56,13 +53,9 @@ fetch('/api/health')
     if (d.proxy) proxyRow.classList.remove('hidden');
     if (d.auth) logoutBtn.classList.remove('hidden');
     if (d.browser) tabBrowser.classList.remove('hidden');
-    if (d.neko && tabNeko) {
-      nekoUrl = d.neko;
-      tabNeko.classList.remove('hidden');
-      if (nekoOpen) nekoOpen.href = nekoUrl;
-    }
+    if (d.ext && extBtn) extBtn.classList.remove('hidden');
     window.DownLL = Object.assign(window.DownLL || {}, {
-      caps: { proxy: !!d.proxy, browser: !!d.browser, hd: !!d.hd, neko: !!d.neko },
+      caps: { proxy: !!d.proxy, browser: !!d.browser, hd: !!d.hd, ext: !!d.ext },
     });
     document.dispatchEvent(new CustomEvent('downll:caps', { detail: window.DownLL.caps }));
   })
@@ -70,25 +63,18 @@ fetch('/api/health')
 
 const useProxy = () => !!(proxyToggle && proxyToggle.checked);
 
-// --- Navigation entre vues (Téléchargeur / Navigateur / Live) ----------------
+// --- Navigation entre vues (Téléchargeur / Navigateur) -----------------------
 function showView(name) {
-  const wide = name === 'browser' || name === 'neko';
-  document.body.classList.toggle('browsing', wide);
-  viewDl.classList.toggle('hidden', name !== 'dl');
-  viewBrowser.classList.toggle('hidden', name !== 'browser');
-  if (viewNeko) viewNeko.classList.toggle('hidden', name !== 'neko');
-  tabDl.classList.toggle('active', name === 'dl');
-  tabBrowser.classList.toggle('active', name === 'browser');
-  if (tabNeko) tabNeko.classList.toggle('active', name === 'neko');
-  // Charge l'iframe Neko au premier affichage seulement.
-  if (name === 'neko' && nekoFrame && !nekoFrame.getAttribute('src') && nekoUrl) {
-    nekoFrame.setAttribute('src', nekoUrl);
-  }
+  const isBrowser = name === 'browser';
+  document.body.classList.toggle('browsing', isBrowser);
+  viewDl.classList.toggle('hidden', isBrowser);
+  viewBrowser.classList.toggle('hidden', !isBrowser);
+  tabDl.classList.toggle('active', !isBrowser);
+  tabBrowser.classList.toggle('active', isBrowser);
   document.dispatchEvent(new CustomEvent('downll:view', { detail: { view: name } }));
 }
 tabDl.addEventListener('click', () => showView('dl'));
 tabBrowser.addEventListener('click', () => showView('browser'));
-if (tabNeko) tabNeko.addEventListener('click', () => showView('neko'));
 
 if (logoutBtn) {
   logoutBtn.addEventListener('click', async () => {
@@ -358,6 +344,137 @@ installBtn.addEventListener('click', async () => {
   installBtn.classList.add('hidden');
 });
 window.addEventListener('appinstalled', () => installBtn.classList.add('hidden'));
+
+// --- Extension navigateur (affiche l'aide + téléchargement) ------------------
+if (extBtn && extHint) {
+  extBtn.addEventListener('click', () => extHint.classList.toggle('hidden'));
+}
+
+// --- Liste live des téléchargements serveur (extension + navigateur intégré) --
+const downloadsBox = $('downloads');
+const dlList = $('dlList');
+const dlRefresh = $('dlRefresh');
+
+function hostOf(u) {
+  try {
+    return new URL(u).hostname.replace(/^www\./, '');
+  } catch {
+    return u || 'Téléchargement';
+  }
+}
+
+const DL_STATUS = {
+  queued: 'En file d’attente…',
+  canceled: 'Annulé',
+};
+
+function renderJob(j) {
+  const li = document.createElement('li');
+  li.className = 'dl-item';
+
+  const info = document.createElement('div');
+  info.className = 'dl-info';
+  const name = document.createElement('span');
+  name.className = 'dl-name';
+  name.textContent = j.fileName || hostOf(j.url);
+  const meta = document.createElement('span');
+  meta.className = 'dl-meta';
+
+  const pct = Math.round(j.percent || 0);
+  const finishing = j.phase === 'postprocess' || (j.status === 'downloading' && pct >= 100);
+  if (j.status === 'downloading' && !finishing) {
+    const extra = [j.speed, j.eta && `ETA ${j.eta}`].filter(Boolean).join(' · ');
+    meta.textContent = `${pct}%${extra ? ' · ' + extra : ''}`;
+  } else if (finishing) {
+    meta.textContent = 'Finalisation…';
+  } else if (j.status === 'error') {
+    meta.textContent = j.error || 'Échec';
+    meta.classList.add('dl-err');
+  } else if (j.status === 'done') {
+    meta.textContent = 'Prêt';
+  } else {
+    meta.textContent = DL_STATUS[j.status] || j.status;
+  }
+  if (j.proxy) meta.textContent += ' · Tor';
+  info.append(name, meta);
+
+  // Barre de progression (masquée si terminé/erreur).
+  const bar = document.createElement('div');
+  bar.className = 'dl-bar';
+  const fill = document.createElement('div');
+  fill.className = 'dl-bar-fill';
+  if (finishing || j.status === 'queued') fill.classList.add('indeterminate');
+  else fill.style.width = `${pct}%`;
+  bar.appendChild(fill);
+
+  const actions = document.createElement('div');
+  actions.className = 'dl-actions';
+  if (j.status === 'done') {
+    const save = document.createElement('a');
+    save.className = 'btn success dl-save';
+    save.href = `/api/file/${j.id}`;
+    save.setAttribute('download', '');
+    save.textContent = '⬇ Enregistrer';
+    actions.appendChild(save);
+  } else if (j.status === 'downloading' || j.status === 'queued') {
+    const cancel = document.createElement('button');
+    cancel.className = 'btn ghost dl-cancel';
+    cancel.type = 'button';
+    cancel.textContent = '✕';
+    cancel.title = 'Annuler';
+    cancel.addEventListener('click', async () => {
+      cancel.disabled = true;
+      try {
+        await fetch(`/api/cancel/${j.id}`, { method: 'POST' });
+      } catch {
+        /* le serveur nettoiera de toute façon */
+      }
+      pollJobs();
+    });
+    actions.appendChild(cancel);
+  }
+
+  li.append(info, bar, actions);
+  if (j.status === 'error') li.classList.add('is-error');
+  if (j.status === 'done') li.classList.add('is-done');
+  return li;
+}
+
+let dlPollTimer = null;
+async function pollJobs() {
+  if (!downloadsBox) return;
+  let jobsList = [];
+  try {
+    const r = await fetch('/api/jobs');
+    if (r.status === 401) return; // session expirée : /api/health gère déjà le reload
+    const d = await r.json();
+    jobsList = Array.isArray(d.jobs) ? d.jobs : [];
+  } catch {
+    return; // hors-ligne : on garde l'affichage courant
+  }
+  if (!jobsList.length) {
+    downloadsBox.classList.add('hidden');
+    dlList.innerHTML = '';
+    return;
+  }
+  downloadsBox.classList.remove('hidden');
+  dlList.innerHTML = '';
+  for (const j of jobsList) dlList.appendChild(renderJob(j));
+}
+
+function startJobsPolling() {
+  if (dlPollTimer) return;
+  pollJobs();
+  dlPollTimer = setInterval(() => {
+    if (!document.hidden) pollJobs();
+  }, 2000);
+}
+
+if (dlRefresh) dlRefresh.addEventListener('click', pollJobs);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) pollJobs();
+});
+startJobsPolling();
 
 // Aide à l'installation pour iOS (Safari ne propose pas de bouton « Installer »).
 (function iosInstallHint() {

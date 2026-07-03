@@ -21,15 +21,21 @@ const path = require('path');
 const auth = require('./lib/auth');
 const browser = require('./lib/browser');
 const hdBrowser = require('./lib/hd-browser');
+const { zip } = require('./lib/zip');
 
 // ---------------------------------------------------------------------------
 // Configuration (tout est surchargeable via variables d'environnement)
 // ---------------------------------------------------------------------------
+// Marqueur de version du code (visible dans /api/health et les messages de
+// diagnostic) : permet de vérifier d'un coup d'œil quelle build tourne vraiment.
+const BUILD = 'deno-fix-5';
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const YTDLP = process.env.YTDLP_PATH || 'yt-dlp';
 const TMP_DIR = process.env.TMP_DIR || path.join(os.tmpdir(), 'downll');
 const FILE_TTL_MS = parseInt(process.env.FILE_TTL_MS || '3600000', 10); // 1 h
 const INFO_TIMEOUT_MS = parseInt(process.env.INFO_TIMEOUT_MS || '45000', 10);
+// Sonde de diagnostic (-J multi-clients) : plus longue, elle essaie plusieurs clients.
+const PROBE_TIMEOUT_MS = parseInt(process.env.PROBE_TIMEOUT_MS || '120000', 10);
 const MAX_DURATION_S = parseInt(process.env.MAX_DURATION_S || '0', 10); // 0 = illimité
 const MAX_FILESIZE = process.env.MAX_FILESIZE || ''; // ex: "3G" (vide = illimité)
 const MAX_CONCURRENT = parseInt(process.env.MAX_CONCURRENT || '3', 10);
@@ -46,8 +52,11 @@ const IMPERSONATE = process.env.IMPERSONATE || '';
 const BROWSER_ENABLED = auth.enabled() && browser.available && process.env.BROWSER !== '0';
 // Mode HD (vidéo+son via ffmpeg/MSE) : nécessite le mode headful (Xvfb+PulseAudio).
 const HD_ENABLED = BROWSER_ENABLED && hdBrowser.available && process.env.BROWSER_HEADFUL === '1';
-// URL (côté navigateur) d'un sidecar Neko (navigateur WebRTC + son). Vide = pas d'onglet Live.
-const NEKO_URL = process.env.NEKO_URL || '';
+// Jeton pour l'extension navigateur (en-tête x-downll-token). Nécessaire seulement
+// si l'auth est activée ; sans auth, /api/download est ouvert et l'extension marche
+// sans jeton. On propose donc l'extension dès que : auth désactivée OU jeton défini.
+const DOWNLL_TOKEN = process.env.DOWNLL_TOKEN || '';
+const EXT_ENABLED = !auth.enabled() || !!DOWNLL_TOKEN;
 
 // ---------------------------------------------------------------------------
 // État en mémoire
@@ -109,6 +118,61 @@ function proxyArgsFor(token) {
 /** Args d'impersonation TLS pour yt-dlp (vide si non configuré). */
 function impersonateArgs() {
   return IMPERSONATE ? ['--impersonate', IMPERSONATE] : [];
+}
+
+// Élargit les « player clients » YouTube. Le client `web` authentifié (cookies)
+// ne renvoie souvent que des flux SABR sans URL téléchargeable -> « Requested
+// format is not available ». Les clients `tv`/`web_safari` fournissent des formats
+// téléchargeables, y compris pour les vidéos à restriction d'âge avec cookies.
+// L'arg est ignoré par les autres extracteurs, donc sans effet hors YouTube.
+const YT_PLAYER_CLIENTS = process.env.YT_PLAYER_CLIENTS || 'default,tv,web_safari,mweb,tv_embedded';
+function youtubeArgs() {
+  return YT_PLAYER_CLIENTS ? ['--extractor-args', `youtube:player_client=${YT_PLAYER_CLIENTS}`] : [];
+}
+
+/** Args communs de sélection de source (impersonation, clients YT, cookies, proxy). */
+function sourceArgs(job) {
+  const a = [...impersonateArgs(), ...youtubeArgs()];
+  if (job.cookiesFile) a.push('--cookies', job.cookiesFile);
+  if (job.proxy) a.push(...proxyArgsFor(job.id));
+  return a;
+}
+
+/**
+ * Sonde les formats réellement disponibles (via -J) quand le sélecteur n'a rien
+ * trouvé. Permet de distinguer un flux protégé sans piste vidéo (SABR) d'un
+ * simple souci de sélecteur, et de donner un message d'erreur actionnable.
+ */
+const PROBE_SIGNAL_RE = /sabr|po.?token|missing a url|only images|sign in|not a bot|nsig|player.?client|skipp|unavailable/i;
+
+async function probeFormats(job) {
+  // Sans --no-warnings : on veut justement les avertissements de yt-dlp.
+  const args = ['-J', '--no-playlist', '--no-color', ...sourceArgs(job), job.url];
+  const { stdout, stderr, code } = await runYtdlp(args, { timeoutMs: PROBE_TIMEOUT_MS });
+  const notes = (stderr || '')
+    .split('\n')
+    .filter((l) => PROBE_SIGNAL_RE.test(l))
+    .map((l) => l.replace(/^\s*(WARNING|ERROR):\s*(\[[\w.:-]+\]\s*)?/i, '').trim())
+    .filter(Boolean)
+    .slice(-3);
+  let parsed = false;
+  let total = 0;
+  let heights = [];
+  let hasVideo = false;
+  if (code === 0 && stdout) {
+    try {
+      const data = JSON.parse(stdout);
+      const fmts = Array.isArray(data.formats) ? data.formats : [];
+      total = fmts.length;
+      const vids = fmts.filter((f) => f.vcodec && f.vcodec !== 'none');
+      hasVideo = vids.length > 0;
+      heights = [...new Set(vids.map((f) => f.height).filter(Boolean))].sort((a, b) => b - a);
+      parsed = true;
+    } catch {
+      /* JSON illisible : parsed reste false */
+    }
+  }
+  return { ok: parsed, total, hasVideo, heights, notes };
 }
 
 /** Lance yt-dlp et renvoie {stdout, stderr, code} ; tue le process au timeout. */
@@ -192,7 +256,8 @@ async function startDownload(job) {
     '--no-playlist',
     '--newline',
     '--no-color',
-    '--no-warnings',
+    // Pas de --no-warnings : sur échec, les avertissements yt-dlp (SABR, PO-token,
+    // « missing a url », « only images ») expliquent pourquoi aucun format ne matche.
     '--restrict-filenames',
     '--progress-template',
     'download:DLP %(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s',
@@ -205,10 +270,7 @@ async function startDownload(job) {
   ];
   if (MAX_FILESIZE) args.push('--max-filesize', MAX_FILESIZE);
   if (MAX_DURATION_S > 0) args.push('--match-filter', `duration<=${MAX_DURATION_S}`);
-  args.push(...impersonateArgs());
-  if (job.cookiesFile) args.push('--cookies', job.cookiesFile);
-  if (job.proxy) args.push(...proxyArgsFor(job.id));
-  args.push(job.url);
+  args.push(...sourceArgs(job), job.url);
 
   return new Promise((resolve) => {
     const child = spawn(YTDLP, args, { windowsHide: true });
@@ -257,7 +319,42 @@ async function startDownload(job) {
       }
       if (code !== 0) {
         job.status = 'error';
-        job.error = stderrTail.trim() || `yt-dlp a quitté avec le code ${code}.`;
+        const raw = stderrTail.trim() || `yt-dlp a quitté avec le code ${code}.`;
+        job.error = raw;
+        // Sélecteur non satisfait : on sonde les formats réels et on renvoie
+        // TOUJOURS un message versionné (le texte anglais brut ne peut plus fuiter :
+        // s'il réapparaît tel quel, c'est que l'ancien code tourne encore).
+        if (/requested format is not available/i.test(raw)) {
+          // Avertissements yt-dlp du téléchargement lui-même (maintenant capturés).
+          const dlSignals = raw
+            .split('\n')
+            .filter((l) => PROBE_SIGNAL_RE.test(l))
+            .map((l) => l.replace(/^\s*(WARNING|ERROR):\s*(\[[\w.:-]+\]\s*)?/i, '').trim())
+            .filter(Boolean);
+          let p = null;
+          try {
+            p = await probeFormats(job);
+          } catch (e) {
+            console.log(`[diag ${BUILD} ${job.id}] sonde : ${e.message}`);
+          }
+          const notes = [...new Set([...(p ? p.notes : []), ...dlSignals])].slice(-3).join(' ; ');
+          console.log(
+            `[diag ${BUILD} ${job.id}] ${job.url} probe=${JSON.stringify(p)} dlSignals=${JSON.stringify(dlSignals)}`
+          );
+          const sabr = /sabr|missing a url|only images/i.test(raw + ' ' + notes);
+          if (p && p.ok && p.hasVideo) {
+            const res = p.heights.length ? p.heights.join('p, ') + 'p' : `${p.total} formats`;
+            job.error = `[${BUILD}] Formats vidéo présents (${res}) mais sélection ratée — bug de sélecteur, signale-le.`;
+          } else if (sabr) {
+            job.error = `[${BUILD}] YouTube force le SABR (aucune URL de téléchargement direct) pour cette vidéo connectée → jeton PO requis.${notes ? ' Détail : ' + notes : ''}`;
+          } else if (notes) {
+            job.error = `[${BUILD}] Téléchargement refusé : ${notes}`;
+          } else if (p && p.ok) {
+            job.error = `[${BUILD}] Aucune piste vidéo (${p.total} formats vus, tous audio/protégés).`;
+          } else {
+            job.error = `[${BUILD}] Format indisponible ; diagnostic brut : ${raw.split('\n').filter(Boolean).slice(-1)[0] || 'n/a'}`;
+          }
+        }
         return resolve();
       }
       try {
@@ -327,7 +424,7 @@ setInterval(() => {
 // ---------------------------------------------------------------------------
 const app = express();
 app.set('trust proxy', TRUST_PROXY === 'false' ? false : Number(TRUST_PROXY) || TRUST_PROXY);
-app.use(express.json({ limit: '16kb' }));
+app.use(express.json({ limit: '256kb' })); // 256kb : marge pour un cookies.txt
 
 const apiLimiter = rateLimit({
   windowMs: 60_000,
@@ -362,7 +459,8 @@ app.get('/api/health', (req, res) => {
     authed: auth.isAuthed(req),
     browser: BROWSER_ENABLED,
     hd: HD_ENABLED,
-    neko: NEKO_URL,
+    ext: EXT_ENABLED,
+    build: BUILD,
   });
 });
 
@@ -386,6 +484,7 @@ app.post('/api/info', async (req, res) => {
   try {
     const args = ['-J', '--no-playlist', '--no-warnings', '--no-color'];
     args.push(...impersonateArgs());
+    args.push(...youtubeArgs());
     if (useProxy) args.push(...proxyArgsFor(crypto.randomBytes(6).toString('hex')));
     args.push(url);
     const { stdout, stderr, code } = await runYtdlp(args, { timeoutMs: INFO_TIMEOUT_MS });
@@ -430,7 +529,18 @@ app.post('/api/download', (req, res) => {
   if (!QUALITY_PRESETS[quality]) {
     return res.status(400).json({ error: 'Qualité inconnue.' });
   }
-  const job = createJob({ url, quality, proxy: useProxy });
+  // Cookies optionnels (extension navigateur) : texte Netscape -> fichier --cookies.
+  let cookiesFile = null;
+  const cookiesText = req.body && typeof req.body.cookies === 'string' ? req.body.cookies : '';
+  if (cookiesText && cookiesText.length < 200000 && /\t/.test(cookiesText)) {
+    cookiesFile = path.join(TMP_DIR, `cookies-${crypto.randomBytes(6).toString('hex')}.txt`);
+    try {
+      fs.writeFileSync(cookiesFile, cookiesText);
+    } catch {
+      cookiesFile = null;
+    }
+  }
+  const job = createJob({ url, quality, proxy: useProxy, cookiesFile });
   res.json({ jobId: job.id });
 });
 
@@ -452,6 +562,26 @@ app.post('/api/cancel/:id', (req, res) => {
     cleanupJob(job);
   }
   res.json({ ok: true, status: 'canceled' });
+});
+
+// --- Liste de tous les téléchargements (y compris ceux lancés par l'extension) -
+app.get('/api/jobs', (req, res) => {
+  const list = [...jobs.values()]
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .map((j) => ({
+      id: j.id,
+      url: j.url,
+      status: j.status,
+      percent: j.percent,
+      phase: j.phase,
+      speed: j.speed,
+      eta: j.eta,
+      fileName: j.fileName,
+      error: j.error,
+      proxy: j.proxy,
+      createdAt: j.createdAt,
+    }));
+  res.json({ jobs: list });
 });
 
 // --- Progression en temps réel (SSE) -----------------------------------------
@@ -500,6 +630,29 @@ app.get('/api/file/:id', (req, res) => {
     // On supprime le fichier après l'envoi (réussi ou non) pour ne rien conserver.
     if (!err) cleanupJob(job);
   });
+});
+
+// --- Extension navigateur : ZIP pré-configuré (URL + jeton injectés) ---------
+app.get('/api/extension.zip', (req, res) => {
+  if (!EXT_ENABLED) return res.status(404).end();
+  try {
+    const extDir = path.join(__dirname, 'extension');
+    const proto = String(req.headers['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim();
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const config = `self.DOWNLL_DEFAULTS = ${JSON.stringify({ url: `${proto}://${host}`, token: DOWNLL_TOKEN })};\n`;
+    const files = [
+      { name: 'manifest.json', data: fs.readFileSync(path.join(extDir, 'manifest.json')) },
+      { name: 'popup.html', data: fs.readFileSync(path.join(extDir, 'popup.html')) },
+      { name: 'popup.js', data: fs.readFileSync(path.join(extDir, 'popup.js')) },
+      { name: 'icon128.png', data: fs.readFileSync(path.join(extDir, 'icon128.png')) },
+      { name: 'config.js', data: Buffer.from(config, 'utf8') },
+    ];
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', 'attachment; filename="downll-extension.zip"');
+    res.end(zip(files));
+  } catch (e) {
+    res.status(500).json({ error: 'Extension indisponible : ' + e.message });
+  }
 });
 
 // --- Statique + PWA -----------------------------------------------------------

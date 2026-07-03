@@ -23,7 +23,6 @@
       <nav class="topbar-nav" id="menu">
         <button class="menu-item active" data-view="dl" id="tabDl" type="button">⬇ Téléchargeur</button>
         <button class="menu-item hidden" data-view="browser" id="tabBrowser" type="button">🌐 Navigateur</button>
-        <button class="menu-item hidden" data-view="neko" id="tabNeko" type="button">📺 Live</button>
       </nav>
       <button class="menu-logout hidden" id="logout" type="button" title="Se déconnecter" aria-label="Se déconnecter">⎋</button>
     </header>
@@ -83,7 +82,31 @@
 
         <p id="error" class="error hidden" role="alert"></p>
 
+        <!-- Liste live de tous les téléchargements serveur (extension incluse). -->
+        <section id="downloads" class="card downloads hidden" aria-live="polite">
+          <div class="downloads-head">
+            <h2>Téléchargements en cours</h2>
+            <button id="dlRefresh" class="btn ghost dl-refresh" type="button" title="Rafraîchir">⟳</button>
+          </div>
+          <ul id="dlList" class="dl-list"></ul>
+        </section>
+
         <button id="install" class="btn ghost hidden">📲 Installer l'application</button>
+
+        <button id="extBtn" class="btn ghost hidden">🧩 Ajouter l'extension navigateur</button>
+        <div
+          id="extHint"
+          class="ioshint hidden"
+          style="flex-direction: column; align-items: stretch; text-align: left"
+        >
+          <p style="margin: 0 0 8px">
+            Pour les vidéos <strong>à restriction d'âge / derrière login</strong> : télécharge
+            l'extension (déjà réglée avec ton serveur + jeton), décompresse-la, puis dans
+            <strong>chrome://extensions</strong> → <strong>Mode développeur</strong> →
+            <strong>« Charger l'extension non empaquetée »</strong> → choisis le dossier décompressé.
+          </p>
+          <a class="btn primary" href="/api/extension.zip" download>📦 Télécharger l'extension</a>
+        </div>
 
         <div id="iosHint" class="ioshint hidden">
           <span class="ioshint-icon" aria-hidden="true">📲</span>
@@ -147,26 +170,6 @@
           Navigue, connecte-toi / passe l'âge si besoin, puis <strong>⬇</strong> télécharge la vidéo
           de la page (avec ta session). « Tor » = IP hors-France. Astuce : touche l'écran pour faire
           apparaître le clavier.
-        </p>
-      </div>
-
-      <!-- ===================== VUE : LIVE (Neko, WebRTC + son) ===================== -->
-      <div id="view-neko" class="view hidden">
-        <div class="neko-bar">
-          <span class="neko-title">📺 Live — navigateur WebRTC fluide + son (Neko)</span>
-          <a id="nekoOpen" class="btn ghost neko-open" target="_blank" rel="noopener">Ouvrir en plein écran ↗</a>
-        </div>
-        <div class="neko-stage">
-          <iframe
-            id="nekoFrame"
-            title="Neko"
-            allow="autoplay; fullscreen; clipboard-read; clipboard-write"
-            allowfullscreen
-          ></iframe>
-        </div>
-        <p class="bv-hint">
-          Pour télécharger une vidéo vue ici : copie son URL et colle-la dans l'onglet
-          <strong>Téléchargeur</strong>. (Si le cadre reste vide, clique « Ouvrir en plein écran ».)
         </p>
       </div>
 

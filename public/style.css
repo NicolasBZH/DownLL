@@ -258,6 +258,107 @@ body {
   word-break: break-word;
 }
 
+/* --- Liste des téléchargements en cours ------------------------------------ */
+.downloads-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.downloads-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+.dl-refresh {
+  width: auto;
+  padding: 4px 10px;
+  font-size: 16px;
+  line-height: 1;
+}
+.dl-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dl-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: 'info actions' 'bar bar';
+  gap: 8px 12px;
+  align-items: center;
+  padding: 12px;
+  background: var(--card2);
+  border-radius: 12px;
+}
+.dl-info {
+  grid-area: info;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dl-name {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl-meta {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dl-meta.dl-err {
+  color: #ffb3bd;
+  white-space: normal;
+}
+.dl-bar {
+  grid-area: bar;
+  height: 6px;
+  border-radius: 999px;
+  background: #0b0e22;
+  overflow: hidden;
+}
+.dl-item.is-done .dl-bar,
+.dl-item.is-error .dl-bar {
+  display: none;
+}
+.dl-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, var(--primary), #7c3ad6);
+  transition: width 0.3s ease;
+}
+.dl-bar-fill.indeterminate {
+  width: 100% !important;
+  background: linear-gradient(90deg, var(--primary) 0%, #7c3ad6 50%, var(--primary) 100%);
+  background-size: 200% 100%;
+  animation: barShift 1.1s linear infinite;
+}
+.dl-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+}
+.dl-save {
+  width: auto;
+  padding: 8px 12px;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.dl-cancel {
+  width: auto;
+  padding: 6px 12px;
+  font-size: 14px;
+  line-height: 1;
+}
+
 .ioshint {
   display: flex;
   align-items: center;
@@ -516,41 +617,6 @@ body.browsing .app {
   font-size: 12.5px;
   line-height: 1.4;
   color: var(--muted);
-}
-
-/* --- Vue Live (Neko, iframe) ----------------------------------------------- */
-.neko-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.neko-title {
-  font-size: 14px;
-  color: var(--muted);
-}
-
-.neko-open {
-  flex: none;
-  padding: 8px 12px;
-  font-size: 13px;
-}
-
-.neko-stage {
-  height: min(76vh, 900px);
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: #000;
-}
-
-#nekoFrame {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  display: block;
 }
 
 .bv-quality {

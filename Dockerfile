@@ -22,6 +22,13 @@ RUN apt-get update \
 # Indispensable pour des sites qui bloquent les clients non-navigateur
 # (ex. PornHub -> sinon « HTTP Error 410: Gone »).
 
+# Runtime JavaScript pour yt-dlp : YouTube exige de résoudre un défi JS (nsig /
+# signature). Sans runtime, les URLs de formats sont invalides -> « Requested
+# format is not available » (y compris vidéos à restriction d'âge). Deno est le
+# runtime activé par défaut par yt-dlp et un binaire autonome (n'affecte pas
+# le Node de l'app). Il exécute le solveur yt_dlp_ejs déjà fourni avec yt-dlp.
+COPY --from=denoland/deno:bin /deno /usr/local/bin/deno
+
 WORKDIR /app
 
 # Dépendances (sans postinstall : gen-icons est lancé après la copie des sources).

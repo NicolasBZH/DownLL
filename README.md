@@ -232,26 +232,20 @@ tout en TCP (aucun port UDP, contrairement au WebRTC). Une session HD à la fois
 serait ~0,6 s). Pour de l'**interaction à faible latence**, le mode **SD** (images,
 sans son) reste plus réactif. Nécessite `BROWSER_HEADFUL=1` (défaut en Docker).
 
-**Mode « 📺 Live » (Neko — WebRTC + son, ~0,2 s).** Pour le **meilleur ressenti
-son+vidéo synchro et basse latence**, DownLL peut embarquer [Neko](https://github.com/m1k1o/neko)
-(navigateur WebRTC en sidecar) dans un onglet **Live** (iframe). Activation :
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.neko.yml up -d --build
-# test local : .\scripts\docker-test.ps1 -Auth tonmotdepasse -Neko
-```
-
-L'onglet « 📺 Live » apparaît si `NEKO_URL` est défini. Compromis : Neko est un
-navigateur **séparé** → pas de bouton ⬇ intégré (copie l'URL dans « Téléchargeur »).
-**WebRTC = port UDP** : en local la plage publiée suffit ; sur un **serveur derrière
-ton panel**, expose la plage UDP, mets `NEKO_WEBRTC_NAT1TO1` = IP publique, et
-`NEKO_URL` = ton URL Neko proxifiée. *(Le mode HD/MSE reste l'option « tout TCP,
-avec ⬇ » ; Neko l'option « latence minimale ».)*
-
 > ⚠️ **À savoir.** L'image embarque Chromium + Xvfb (~+450 Mo). Chaque session
 > active consomme ~0,5–1 Go de RAM (`MAX_BROWSER_SESSIONS` limite le parallélisme,
 > GC auto après 5 min d'inactivité). Le rendu est *streamé* : net mais pas
 > natif-lisse, surtout via Tor. **Ne jamais exposer sans `AUTH_PASSWORD`.**
+
+### Vidéos à restriction d'âge / login (extension navigateur)
+
+Certaines vidéos (YouTube « confirme ton âge », contenus derrière connexion)
+exigent les **cookies d'une session connectée**. L'[extension DownLL](extension/)
+(Chrome/Brave/Edge) ajoute un bouton **« Télécharger cette page »** qui lit
+l'URL + tes cookies (dont les `HttpOnly`) **de ton propre navigateur** et les
+envoie à ton serveur → yt-dlp les réutilise. Nécessite `DOWNLL_TOKEN` côté serveur.
+Voir [`extension/README.md`](extension/README.md). *(Tu peux aussi passer un
+`cookies.txt` via `/api/download` — champ `cookies`.)*
 
 ---
 
@@ -273,9 +267,9 @@ Définies dans le service systemd ([`deploy/downll.service`](deploy/downll.servi
 | `PROXY`           | *(vide)*       | Proxy sortant yt-dlp (Tor/VPN/SOCKS/HTTP)    |
 | `IMPERSONATE`     | `chrome`*      | Impersonation TLS navigateur (curl_cffi)     |
 | `AUTH_PASSWORD`   | *(vide)*       | Mot de passe d'accès. Active aussi le navigateur intégré |
+| `DOWNLL_TOKEN`    | *(vide)*       | Jeton pour l'extension navigateur ([`extension/`](extension/)) |
 | `MAX_BROWSER_SESSIONS` | `2`       | Sessions de navigateur distant simultanées   |
 | `BROWSER_HEADFUL` | `1` (Docker)   | Navigateur visible via Xvfb (anti-détection) |
-| `NEKO_URL`        | *(vide)*       | URL d'un sidecar Neko -> onglet « 📺 Live »   |
 
 \* `chrome` en Docker et via `install.sh`. Le serveur seul (sans curl_cffi) doit
 laisser `IMPERSONATE` vide, sinon yt-dlp échoue faute de backend d'impersonation.

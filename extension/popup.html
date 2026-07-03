@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        width: 300px;
+        margin: 0;
+        padding: 14px;
+        font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: #171a35;
+        color: #eef1ff;
+      }
+      h1 { font-size: 15px; margin: 0 0 10px; }
+      input {
+        width: 100%;
+        padding: 8px;
+        margin: 4px 0 8px;
+        border-radius: 8px;
+        border: 1px solid #3a3f66;
+        background: #11142e;
+        color: #eef1ff;
+        box-sizing: border-box;
+      }
+      button {
+        width: 100%;
+        padding: 10px;
+        border: 0;
+        border-radius: 8px;
+        background: #5b8cff;
+        color: #fff;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button.sec { background: #242a52; }
+      .muted { color: #9aa3c7; font-size: 12px; }
+      #status { margin-top: 10px; font-size: 13px; min-height: 18px; }
+      .hidden { display: none; }
+      a { color: #8fb0ff; }
+    </style>
+  </head>
+  <body>
+    <h1>⬇ DownLL</h1>
+    <button id="dl">Télécharger cette page</button>
+    <div id="status"></div>
+    <div class="muted" style="margin-top: 10px"><a href="#" id="toggleCfg">Réglages ▾</a></div>
+    <div id="cfg" class="hidden" style="margin-top: 8px">
+      <label class="muted">URL du serveur DownLL</label>
+      <input id="url" placeholder="https://ton-domaine" />
+      <label class="muted">Jeton (DOWNLL_TOKEN)</label>
+      <input id="token" type="password" placeholder="ton token" />
+      <button class="sec" id="save">Enregistrer</button>
+    </div>
+    <script src="config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

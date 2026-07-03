@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "DownLL - Telecharger",
+  "version": "1.0.0",
+  "description": "Envoie l'URL et les cookies de session (login/age) de ton navigateur a ton serveur DownLL pour telecharger.",
+  "permissions": ["cookies", "storage", "activeTab"],
+  "host_permissions": ["*://*.youtube.com/*", "*://*.google.com/*"],
+  "optional_host_permissions": ["*://*/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Telecharger avec DownLL",
+    "default_icon": "icon128.png"
+  },
+  "icons": { "128": "icon128.png" }
+}

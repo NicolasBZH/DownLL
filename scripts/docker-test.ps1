@@ -31,6 +31,10 @@
     Mot de passe d'acces. Active l'ecran de connexion ET le navigateur integre
     (sinon desactive). Ex : -Auth secret
 
+.PARAMETER Token
+    Jeton DOWNLL_TOKEN pour l'extension navigateur (bouton "Ajouter l'extension").
+    Si -Auth est fourni sans -Token, un jeton local par defaut est utilise.
+
 .EXAMPLE
     .\scripts\docker-test.ps1
     .\scripts\docker-test.ps1 -Port 8080
@@ -47,8 +51,8 @@ param(
     [switch]$Logs,
     [switch]$Rebuild,
     [switch]$Tor,
-    [switch]$Neko,
-    [string]$Auth = ''
+    [string]$Auth = '',
+    [string]$Token = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,16 +81,19 @@ if ($Tor) {
     $composeArgs += @('-f', 'docker-compose.tor.yml')
     Write-Host "[Tor] Sidecar Tor active + case 'Via Tor' dans l'app." -ForegroundColor Magenta
 }
-if ($Neko) {
-    $composeArgs += @('-f', 'docker-compose.neko.yml')
-    Write-Host "[Live] Sidecar Neko (WebRTC + son) : onglet 'Live' (mot de passe Neko = neko)." -ForegroundColor Magenta
-}
 $torSuffix = if ($Tor) { ' -Tor' } else { '' }
 
 # Mot de passe -> active l'auth et le navigateur integre (lu par compose).
 $env:AUTH_PASSWORD = $Auth
 if ($Auth) {
     Write-Host "[Auth] Connexion + navigateur integre actives (mot de passe fourni)." -ForegroundColor Magenta
+}
+
+# Jeton pour l'extension navigateur (defaut local si -Auth sans -Token).
+if ($Auth -and -not $Token) { $Token = 'downll-local-token' }
+$env:DOWNLL_TOKEN = $Token
+if ($Token) {
+    Write-Host "[Ext] DOWNLL_TOKEN = $Token (bouton 'Ajouter l'extension' actif)." -ForegroundColor Magenta
 }
 
 Assert-Docker

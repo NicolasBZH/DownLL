@@ -6,6 +6,8 @@ REM Transmet les arguments au script PowerShell. Exemples en ligne de commande :
 REM   test-docker.cmd              build + demarre + ouvre le navigateur
 REM   test-docker.cmd -Port 8080   si le port 3000 est deja pris
 REM   test-docker.cmd -Tor         + sidecar Tor (case "Via Tor" dans l'app)
+REM   test-docker.cmd -Auth mdp    active login + navigateur integre + extension
+REM   test-docker.cmd -Auth mdp -Token abc   jeton pour l'extension navigateur
 REM   test-docker.cmd -Rebuild     reconstruit l'image sans cache (yt-dlp tout neuf)
 REM   test-docker.cmd -Logs        logs en direct
 REM   test-docker.cmd -Down        arret + suppression des conteneurs

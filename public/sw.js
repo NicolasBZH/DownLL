@@ -2,7 +2,7 @@
    l'installation PWA et un démarrage hors-ligne. Les appels /api ne sont
    jamais mis en cache. */
 
-const CACHE = 'downll-v13';
+const CACHE = 'downll-v16';
 const SHELL = [
   '/index.html',
   '/style.css',
